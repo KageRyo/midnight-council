@@ -1,0 +1,6 @@
+.conda-go/
+.env
+.env.*
+bin/
+coverage.out
+
