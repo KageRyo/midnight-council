@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gorilla/websocket"
 
+	"midnight-council/internal/protocol"
 	"midnight-council/internal/room"
 )
 
@@ -22,12 +24,6 @@ const (
 type Handler struct {
 	hub      *room.Hub
 	upgrader websocket.Upgrader
-}
-
-type clientEvent struct {
-	Type    room.EventType `json:"type"`
-	Ready   bool           `json:"ready"`
-	Message string         `json:"message"`
 }
 
 func NewHandler(hub *room.Hub) *Handler {
@@ -104,26 +100,40 @@ func readPump(ctx context.Context, actor *room.Actor, playerID, playerName strin
 	})
 
 	for {
-		var incoming clientEvent
-		if err := conn.ReadJSON(&incoming); err != nil {
+		messageType, payload, err := conn.ReadMessage()
+		if err != nil {
 			return
 		}
-
-		event := room.Event{
-			Type:       incoming.Type,
-			PlayerID:   playerID,
-			PlayerName: playerName,
-			Ready:      incoming.Ready,
-			Message:    incoming.Message,
+		if messageType != websocket.TextMessage {
+			if !sendError(errors, "client events must be text JSON messages") {
+				return
+			}
+			continue
 		}
 
+		incoming, err := protocol.DecodeClientEvent(bytes.NewReader(payload))
+		if err != nil {
+			if !sendError(errors, err.Error()) {
+				return
+			}
+			continue
+		}
+
+		event := incoming.RoomEvent(playerID, playerName)
 		if _, err := actor.Dispatch(ctx, event); err != nil {
-			select {
-			case errors <- room.Envelope{Type: "error", Error: err.Error()}:
-			default:
+			if !sendError(errors, err.Error()) {
 				return
 			}
 		}
+	}
+}
+
+func sendError(errors chan<- room.Envelope, message string) bool {
+	select {
+	case errors <- room.Envelope{Type: "error", Error: message}:
+		return true
+	default:
+		return false
 	}
 }
 

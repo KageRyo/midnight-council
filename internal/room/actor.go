@@ -9,13 +9,15 @@ type Actor struct {
 }
 
 type command struct {
-	event       *Event
-	subscribe   chan<- subscription
-	unsubscribe string
-	reply       chan result
+	event             *Event
+	subscribe         chan<- subscription
+	subscribePlayerID string
+	unsubscribe       string
+	reply             chan result
 }
 
 type subscription struct {
+	id       string
 	playerID string
 	events   chan Envelope
 }
@@ -58,7 +60,7 @@ func (a *Actor) Subscribe(ctx context.Context, playerID string) (<-chan Envelope
 	reply := make(chan subscription, 1)
 
 	select {
-	case a.inbox <- command{subscribe: reply}:
+	case a.inbox <- command{subscribe: reply, subscribePlayerID: playerID}:
 	case <-ctx.Done():
 		return nil, nil, ctx.Err()
 	}
@@ -71,47 +73,49 @@ func (a *Actor) Subscribe(ctx context.Context, playerID string) (<-chan Envelope
 	}
 
 	done := func() {
-		a.inbox <- command{unsubscribe: sub.playerID}
+		a.inbox <- command{unsubscribe: sub.id}
 	}
 
 	return sub.events, done, nil
 }
 
 func (a *Actor) run(state *State) {
-	subscribers := make(map[string]chan Envelope)
+	subscribers := make(map[string]subscription)
 
 	for cmd := range a.inbox {
 		switch {
 		case cmd.event != nil:
 			envelope, err := state.Apply(*cmd.event)
 			if err == nil && envelope != nil {
-				broadcast(subscribers, *envelope)
+				broadcast(state, subscribers, *envelope)
 			}
 			cmd.reply <- result{envelope: envelope, err: err}
 		case cmd.subscribe != nil:
 			sub := subscription{
-				playerID: randomSubscriptionID(),
+				id:       randomSubscriptionID(),
+				playerID: cmd.subscribePlayerID,
 				events:   make(chan Envelope, 16),
 			}
-			subscribers[sub.playerID] = sub.events
-			sub.events <- *stateEnvelope(state.Snapshot())
+			subscribers[sub.id] = sub
+			sub.events <- *state.EnvelopeForPlayer(sub.playerID)
 			cmd.subscribe <- sub
 		case cmd.unsubscribe != "":
-			if events, ok := subscribers[cmd.unsubscribe]; ok {
+			if sub, ok := subscribers[cmd.unsubscribe]; ok {
 				delete(subscribers, cmd.unsubscribe)
-				close(events)
+				close(sub.events)
 			}
 		}
 	}
 }
 
-func broadcast(subscribers map[string]chan Envelope, envelope Envelope) {
-	for id, events := range subscribers {
+func broadcast(state *State, subscribers map[string]subscription, envelope Envelope) {
+	for id, sub := range subscribers {
+		personalized := state.Personalize(envelope, sub.playerID)
 		select {
-		case events <- envelope:
+		case sub.events <- personalized:
 		default:
 			delete(subscribers, id)
-			close(events)
+			close(sub.events)
 		}
 	}
 }
