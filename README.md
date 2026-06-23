@@ -2,7 +2,7 @@
 
 Midnight Council is a real-time social deduction game server prototype.
 
-The current backend is intentionally small, but it already models a complete playable loop: nickname-based join, room readiness, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, win detection, settlement, and basic disconnect/reconnect by `player_id`.
+The current backend is intentionally small, but it already models a complete playable loop: nickname-based join, room readiness, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, win detection, settlement, and reconnect-token based disconnect/reconnect.
 
 ## Current Scope
 
@@ -21,6 +21,7 @@ The current backend is intentionally small, but it already models a complete pla
 - Day voting and execution
 - Shooter one-shot day action
 - Win detection and game result reveal
+- Reconnect token for existing player seats
 - Public event log for game flow
 - Strict WebSocket client event schema validation
 - Unit-tested room state rules
@@ -77,6 +78,12 @@ Connect:
 ws://localhost:8080/ws/rooms/{room_id}?player_id={player_id}&name={display_name}
 ```
 
+Reconnect to an existing player seat:
+
+```text
+ws://localhost:8080/ws/rooms/{room_id}?player_id={player_id}&name={display_name}&reconnect_token={private_token}
+```
+
 The server broadcasts envelopes:
 
 ```json
@@ -90,6 +97,7 @@ The server broadcasts envelopes:
   },
   "private": {
     "player_id": "p1",
+    "reconnect_token": "private-token",
     "role": "DETECTIVE",
     "alive": true,
     "action_required": true,
@@ -98,7 +106,7 @@ The server broadcasts envelopes:
 }
 ```
 
-`state` is safe to broadcast to everyone. `private` is generated per subscriber and contains only that player's own hidden information.
+`state` is safe to broadcast to everyone. `private` is generated per subscriber and contains only that player's own hidden information, including the reconnect token needed to reclaim the same seat.
 
 ### Client Events
 

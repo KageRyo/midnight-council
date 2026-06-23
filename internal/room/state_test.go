@@ -41,6 +41,9 @@ func TestStateJoinReadyStartAssignsPrivateRoles(t *testing.T) {
 	if private := state.PrivateView("owner"); private == nil || private.Role == "" {
 		t.Fatalf("owner private view did not include assigned role: %#v", private)
 	}
+	if private := state.PrivateView("owner"); private == nil || private.ReconnectToken == "" {
+		t.Fatalf("owner private view did not include reconnect token: %#v", private)
+	}
 }
 
 func TestStateRejectsStartFromNonOwner(t *testing.T) {
@@ -224,6 +227,7 @@ func TestReconnectKeepsInGamePlayerAndRole(t *testing.T) {
 		"owner": RoleKiller,
 		"guest": RoleVillager,
 	})
+	reconnectToken := state.players["guest"].ReconnectToken
 
 	if _, err := state.Apply(Event{Type: EventLeave, PlayerID: "guest"}); err != nil {
 		t.Fatalf("leave: %v", err)
@@ -232,7 +236,12 @@ func TestReconnectKeepsInGamePlayerAndRole(t *testing.T) {
 		t.Fatal("guest should be marked disconnected")
 	}
 
-	if _, err := state.Apply(Event{Type: EventJoin, PlayerID: "guest", PlayerName: "Guest Again"}); err != nil {
+	if _, err := state.Apply(Event{
+		Type:           EventJoin,
+		PlayerID:       "guest",
+		PlayerName:     "Guest Again",
+		ReconnectToken: reconnectToken,
+	}); err != nil {
 		t.Fatalf("rejoin: %v", err)
 	}
 	if !state.players["guest"].Connected {
@@ -240,6 +249,35 @@ func TestReconnectKeepsInGamePlayerAndRole(t *testing.T) {
 	}
 	if state.players["guest"].Role != RoleVillager {
 		t.Fatalf("guest role = %s, want %s", state.players["guest"].Role, RoleVillager)
+	}
+}
+
+func TestReconnectRejectsMissingToken(t *testing.T) {
+	state := gameStateWithRoles(PhaseNight, map[string]Role{
+		"owner": RoleKiller,
+		"guest": RoleVillager,
+	})
+
+	_, err := state.Apply(Event{Type: EventJoin, PlayerID: "guest", PlayerName: "Guest Again"})
+	if !errors.Is(err, ErrReconnectTokenRequired) {
+		t.Fatalf("err = %v, want %v", err, ErrReconnectTokenRequired)
+	}
+}
+
+func TestReconnectRejectsInvalidToken(t *testing.T) {
+	state := gameStateWithRoles(PhaseNight, map[string]Role{
+		"owner": RoleKiller,
+		"guest": RoleVillager,
+	})
+
+	_, err := state.Apply(Event{
+		Type:           EventJoin,
+		PlayerID:       "guest",
+		PlayerName:     "Guest Again",
+		ReconnectToken: "wrong-token",
+	})
+	if !errors.Is(err, ErrInvalidReconnectToken) {
+		t.Fatalf("err = %v, want %v", err, ErrInvalidReconnectToken)
 	}
 }
 
@@ -278,13 +316,14 @@ func gameStateWithRoles(phase Phase, roles map[string]Role) *State {
 
 	for id, role := range roles {
 		state.players[id] = &Player{
-			ID:        id,
-			Name:      id,
-			Ready:     true,
-			Connected: true,
-			Role:      role,
-			Alive:     true,
-			JoinedAt:  now,
+			ID:             id,
+			Name:           id,
+			ReconnectToken: "token-" + id,
+			Ready:          true,
+			Connected:      true,
+			Role:           role,
+			Alive:          true,
+			JoinedAt:       now,
 		}
 	}
 	return state

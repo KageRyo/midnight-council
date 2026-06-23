@@ -2,6 +2,7 @@ package room
 
 import (
 	cryptorand "crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"math/big"
@@ -17,24 +18,26 @@ const (
 )
 
 var (
-	ErrPlayerIDRequired     = errors.New("player id is required")
-	ErrPlayerNameRequired   = errors.New("player name is required")
-	ErrPlayerNotFound       = errors.New("player not found")
-	ErrOwnerOnly            = errors.New("only the room owner can perform this action")
-	ErrRoomNotWaiting       = errors.New("room is not waiting")
-	ErrRoomNotJoinable      = errors.New("room is not joinable")
-	ErrWrongPhase           = errors.New("action is not allowed in the current phase")
-	ErrGameFinished         = errors.New("game is already finished")
-	ErrNotEnoughPlayers     = errors.New("not enough players to start")
-	ErrPlayersNotReady      = errors.New("all non-owner players must be ready")
-	ErrEmptyMessage         = errors.New("message is empty")
-	ErrMessageTooLong       = errors.New("message is too long")
-	ErrPlayerDead           = errors.New("player is dead")
-	ErrInvalidTarget        = errors.New("target is invalid")
-	ErrSelfTargetNotAllowed = errors.New("self target is not allowed")
-	ErrRoleHasNoNightAction = errors.New("role has no night action")
-	ErrShooterOnly          = errors.New("only the shooter can perform this action")
-	ErrShooterAlreadyUsed   = errors.New("shooter action has already been used")
+	ErrPlayerIDRequired       = errors.New("player id is required")
+	ErrPlayerNameRequired     = errors.New("player name is required")
+	ErrPlayerNotFound         = errors.New("player not found")
+	ErrReconnectTokenRequired = errors.New("reconnect token is required")
+	ErrInvalidReconnectToken  = errors.New("reconnect token is invalid")
+	ErrOwnerOnly              = errors.New("only the room owner can perform this action")
+	ErrRoomNotWaiting         = errors.New("room is not waiting")
+	ErrRoomNotJoinable        = errors.New("room is not joinable")
+	ErrWrongPhase             = errors.New("action is not allowed in the current phase")
+	ErrGameFinished           = errors.New("game is already finished")
+	ErrNotEnoughPlayers       = errors.New("not enough players to start")
+	ErrPlayersNotReady        = errors.New("all non-owner players must be ready")
+	ErrEmptyMessage           = errors.New("message is empty")
+	ErrMessageTooLong         = errors.New("message is too long")
+	ErrPlayerDead             = errors.New("player is dead")
+	ErrInvalidTarget          = errors.New("target is invalid")
+	ErrSelfTargetNotAllowed   = errors.New("self target is not allowed")
+	ErrRoleHasNoNightAction   = errors.New("role has no night action")
+	ErrShooterOnly            = errors.New("only the shooter can perform this action")
+	ErrShooterAlreadyUsed     = errors.New("shooter action has already been used")
 )
 
 type State struct {
@@ -154,6 +157,7 @@ func (s *State) PrivateView(playerID string) *PrivatePlayerView {
 
 	view := &PrivatePlayerView{
 		PlayerID:       player.ID,
+		ReconnectToken: player.ReconnectToken,
 		Alive:          alive,
 		Investigations: append([]InvestigationResult(nil), s.investigations[player.ID]...),
 	}
@@ -212,6 +216,12 @@ func (s *State) applyJoin(event Event) (*Envelope, error) {
 
 	player, exists := s.players[event.PlayerID]
 	if exists {
+		if strings.TrimSpace(event.ReconnectToken) == "" {
+			return nil, ErrReconnectTokenRequired
+		}
+		if event.ReconnectToken != player.ReconnectToken {
+			return nil, ErrInvalidReconnectToken
+		}
 		player.Name = strings.TrimSpace(event.PlayerName)
 		player.Connected = true
 		s.touch(event.At)
@@ -222,12 +232,18 @@ func (s *State) applyJoin(event Event) (*Envelope, error) {
 		return nil, ErrRoomNotJoinable
 	}
 
+	reconnectToken, err := newReconnectToken()
+	if err != nil {
+		return nil, err
+	}
+
 	s.players[event.PlayerID] = &Player{
-		ID:        event.PlayerID,
-		Name:      strings.TrimSpace(event.PlayerName),
-		Connected: true,
-		Alive:     true,
-		JoinedAt:  event.At,
+		ID:             event.PlayerID,
+		Name:           strings.TrimSpace(event.PlayerName),
+		ReconnectToken: reconnectToken,
+		Connected:      true,
+		Alive:          true,
+		JoinedAt:       event.At,
 	}
 	if s.ownerID == "" {
 		s.ownerID = event.PlayerID
@@ -806,6 +822,14 @@ func shuffleRoles(roles []Role) error {
 		roles[i], roles[j] = roles[j], roles[i]
 	}
 	return nil
+}
+
+func newReconnectToken() (string, error) {
+	var bytes [32]byte
+	if _, err := cryptorand.Read(bytes[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes[:]), nil
 }
 
 func topVoteTarget(tallies map[string]int) (string, bool) {

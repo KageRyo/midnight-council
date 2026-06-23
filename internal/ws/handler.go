@@ -46,6 +46,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	playerID := strings.TrimSpace(r.URL.Query().Get("player_id"))
 	playerName := strings.TrimSpace(r.URL.Query().Get("name"))
+	reconnectToken := strings.TrimSpace(r.URL.Query().Get("reconnect_token"))
 	if playerID == "" || playerName == "" {
 		http.Error(w, "player_id and name query params are required", http.StatusBadRequest)
 		return
@@ -60,17 +61,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	actor := h.hub.GetOrCreate(roomID)
 	ctx := r.Context()
 
-	events, unsubscribe, err := actor.Subscribe(ctx, playerID)
-	if err != nil {
-		_ = writeEnvelope(conn, room.Envelope{Type: "error", Error: err.Error()})
-		return
-	}
-	defer unsubscribe()
-
 	_, err = actor.Dispatch(ctx, room.Event{
-		Type:       room.EventJoin,
-		PlayerID:   playerID,
-		PlayerName: playerName,
+		Type:           room.EventJoin,
+		PlayerID:       playerID,
+		PlayerName:     playerName,
+		ReconnectToken: reconnectToken,
 	})
 	if err != nil {
 		_ = writeEnvelope(conn, room.Envelope{Type: "error", Error: err.Error()})
@@ -84,6 +79,13 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			PlayerID: playerID,
 		})
 	}()
+
+	events, unsubscribe, err := actor.Subscribe(ctx, playerID)
+	if err != nil {
+		_ = writeEnvelope(conn, room.Envelope{Type: "error", Error: err.Error()})
+		return
+	}
+	defer unsubscribe()
 
 	done := make(chan struct{})
 	errors := make(chan room.Envelope, 8)

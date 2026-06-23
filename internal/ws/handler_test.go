@@ -38,9 +38,18 @@ func TestHandlerPlaysFullGameOverWebSocket(t *testing.T) {
 	}
 	defer closeClients(clients)
 
+	readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return len(state.Players) == len(clients)
+	})
+
 	for _, client := range clients[1:] {
 		writeClientEvent(t, client, map[string]any{"type": "ready", "ready": true})
 	}
+
+	readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return nonOwnerPlayersReady(state)
+	})
+
 	writeClientEvent(t, clients[0], map[string]any{"type": "start_game"})
 
 	byRole := make(map[room.Role]*testClient)
@@ -120,7 +129,37 @@ func TestHandlerRejectsInvalidClientEventSchema(t *testing.T) {
 	}
 }
 
+func TestHandlerRequiresReconnectTokenForExistingPlayer(t *testing.T) {
+	server := httptest.NewServer(NewHandler(room.NewHub()))
+	defer server.Close()
+
+	original := connectClient(t, server.URL, "p1", "Player 1")
+	defer original.conn.Close()
+
+	joined := readStateUntil(t, original, func(_ *room.Snapshot, private *room.PrivatePlayerView) bool {
+		return private != nil && private.ReconnectToken != ""
+	})
+	reconnectToken := joined.Private.ReconnectToken
+
+	rejected := connectClient(t, server.URL, "p1", "Impostor")
+	defer rejected.conn.Close()
+	readEnvelopeUntil(t, rejected, func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && strings.Contains(envelope.Error, "reconnect token is required")
+	})
+
+	reconnected := connectClientWithToken(t, server.URL, "p1", "Player 1 Again", reconnectToken)
+	defer reconnected.conn.Close()
+	readStateUntil(t, reconnected, func(_ *room.Snapshot, private *room.PrivatePlayerView) bool {
+		return private != nil && private.ReconnectToken == reconnectToken
+	})
+}
+
 func connectClient(t *testing.T, serverURL, playerID, playerName string) *testClient {
+	t.Helper()
+	return connectClientWithToken(t, serverURL, playerID, playerName, "")
+}
+
+func connectClientWithToken(t *testing.T, serverURL, playerID, playerName, reconnectToken string) *testClient {
 	t.Helper()
 
 	parsed, err := url.Parse(serverURL)
@@ -132,6 +171,9 @@ func connectClient(t *testing.T, serverURL, playerID, playerName string) *testCl
 	query := parsed.Query()
 	query.Set("player_id", playerID)
 	query.Set("name", playerName)
+	if reconnectToken != "" {
+		query.Set("reconnect_token", reconnectToken)
+	}
 	parsed.RawQuery = query.Encode()
 
 	conn, _, err := websocket.DefaultDialer.Dial(parsed.String(), nil)
@@ -202,6 +244,18 @@ func requireRoleClient(t *testing.T, byRole map[room.Role]*testClient, role room
 		t.Fatalf("missing client with role %s", role)
 	}
 	return client
+}
+
+func nonOwnerPlayersReady(state *room.Snapshot) bool {
+	if len(state.Players) == 0 {
+		return false
+	}
+	for _, player := range state.Players {
+		if !player.Owner && !player.Ready {
+			return false
+		}
+	}
+	return true
 }
 
 func playerAlive(t *testing.T, state *room.Snapshot, playerID string) bool {

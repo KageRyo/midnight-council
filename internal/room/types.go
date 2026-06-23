@@ -69,24 +69,26 @@ const (
 )
 
 type Event struct {
-	Type       EventType
-	PlayerID   string
-	PlayerName string
-	Ready      bool
-	Message    string
-	TargetID   string
-	At         time.Time
+	Type           EventType
+	PlayerID       string
+	PlayerName     string
+	ReconnectToken string
+	Ready          bool
+	Message        string
+	TargetID       string
+	At             time.Time
 }
 
 type Player struct {
-	ID          string
-	Name        string
-	Ready       bool
-	Connected   bool
-	Role        Role
-	Alive       bool
-	ShooterUsed bool
-	JoinedAt    time.Time
+	ID             string
+	Name           string
+	ReconnectToken string
+	Ready          bool
+	Connected      bool
+	Role           Role
+	Alive          bool
+	ShooterUsed    bool
+	JoinedAt       time.Time
 }
 
 type PlayerView struct {
@@ -112,6 +114,7 @@ type Snapshot struct {
 
 type PrivatePlayerView struct {
 	PlayerID       string                `json:"player_id"`
+	ReconnectToken string                `json:"reconnect_token,omitempty"`
 	Role           Role                  `json:"role,omitempty"`
 	Alive          bool                  `json:"alive"`
 	ActionRequired bool                  `json:"action_required"`
