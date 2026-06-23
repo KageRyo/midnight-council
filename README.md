@@ -24,6 +24,7 @@ The current backend is intentionally small, but it already models a complete pla
 - Public event log for game flow
 - Strict WebSocket client event schema validation
 - Unit-tested room state rules
+- WebSocket integration tests for a full multiplayer game flow
 
 Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, timers, moderation, rate limiting, horizontal scaling, or a web frontend.
 
