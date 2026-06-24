@@ -4,17 +4,34 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"sync"
+	"time"
 )
 
+const DefaultRoomIdleTimeout = 30 * time.Minute
+
 type Hub struct {
-	mu    sync.Mutex
-	rooms map[string]*Actor
+	mu          sync.Mutex
+	rooms       map[string]*Actor
+	idleTimeout time.Duration
 }
 
-func NewHub() *Hub {
-	return &Hub{
-		rooms: make(map[string]*Actor),
+type HubOption func(*Hub)
+
+func WithRoomIdleTimeout(timeout time.Duration) HubOption {
+	return func(h *Hub) {
+		h.idleTimeout = timeout
 	}
+}
+
+func NewHub(options ...HubOption) *Hub {
+	hub := &Hub{
+		rooms:       make(map[string]*Actor),
+		idleTimeout: DefaultRoomIdleTimeout,
+	}
+	for _, option := range options {
+		option(hub)
+	}
+	return hub
 }
 
 func (h *Hub) GetOrCreate(roomID string) *Actor {
@@ -22,12 +39,33 @@ func (h *Hub) GetOrCreate(roomID string) *Actor {
 	defer h.mu.Unlock()
 
 	if actor, ok := h.rooms[roomID]; ok {
-		return actor
+		if !actor.Closed() {
+			return actor
+		}
+		delete(h.rooms, roomID)
 	}
 
-	actor := NewActor(roomID)
+	var actor *Actor
+	actor = newActor(roomID, h.idleTimeout, func() {
+		h.remove(roomID, actor)
+	})
 	h.rooms[roomID] = actor
 	return actor
+}
+
+func (h *Hub) RoomCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return len(h.rooms)
+}
+
+func (h *Hub) remove(roomID string, actor *Actor) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.rooms[roomID] == actor {
+		delete(h.rooms, roomID)
+	}
 }
 
 func randomSubscriptionID() string {

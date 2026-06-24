@@ -22,12 +22,15 @@ The current backend is intentionally small, but it already models a complete pla
 - Shooter one-shot day action
 - Win detection and game result reveal
 - Reconnect token for existing player seats
+- Room idle timeout and hub cleanup
 - Public event log for game flow
 - Strict WebSocket client event schema validation
 - Unit-tested room state rules
 - WebSocket integration tests for a full multiplayer game flow
 
 Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, timers, moderation, rate limiting, horizontal scaling, or a web frontend.
+
+See `docs/roadmap.md` for the next implementation tasks.
 
 ## Local Toolchain
 
@@ -53,6 +56,12 @@ The server listens on `:8080` by default. Override with `ADDR`:
 
 ```bash
 ADDR=:8081 make run
+```
+
+Rooms with no active WebSocket subscribers are removed after `30m` by default. Override with `ROOM_IDLE_TIMEOUT`:
+
+```bash
+ROOM_IDLE_TIMEOUT=5m make run
 ```
 
 The explicit Go command used by `make test` is:

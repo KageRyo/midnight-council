@@ -15,8 +15,9 @@ import (
 
 func main() {
 	addr := getenv("ADDR", ":8080")
+	roomIdleTimeout := getenvDuration("ROOM_IDLE_TIMEOUT", room.DefaultRoomIdleTimeout)
 
-	hub := room.NewHub()
+	hub := room.NewHub(room.WithRoomIdleTimeout(roomIdleTimeout))
 	handler := ws.NewHandler(hub)
 
 	mux := http.NewServeMux()
@@ -33,7 +34,7 @@ func main() {
 	}
 
 	go func() {
-		log.Printf("midnight-council game server listening on %s", addr)
+		log.Printf("midnight-council game server listening on %s with room idle timeout %s", addr, roomIdleTimeout)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server failed: %v", err)
 		}
@@ -56,4 +57,17 @@ func getenv(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func getenvDuration(key string, fallback time.Duration) time.Duration {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		log.Fatalf("invalid %s duration %q: %v", key, value, err)
+	}
+	return duration
 }
