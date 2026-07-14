@@ -48,10 +48,13 @@ The server sends one of three envelope types.
     "room_id": "demo",
     "owner_id": "p1",
     "phase": "NIGHT",
+    "phase_started_at": "2026-07-14T09:00:00Z",
+    "phase_deadline": "2026-07-14T09:01:30Z",
     "round": 1,
     "players": [],
     "log": [],
-    "updated_at": "2026-07-14T09:00:00Z"
+    "updated_at": "2026-07-14T09:00:00Z",
+    "server_time": "2026-07-14T09:00:10Z"
   },
   "private": {
     "player_id": "p1",
@@ -70,6 +73,8 @@ The server sends one of three envelope types.
 The `state` object is identical for all subscribers and is safe to broadcast. Roles are omitted from public player views until `FINISHED`. The `private` object is generated for the receiving player and must never be shown to another player.
 
 `available` describes events the UI may offer, but it is not authorization: the server validates the current state again when an event arrives.
+
+`phase_started_at` identifies the current phase transition. `phase_deadline` is present for `NIGHT`, `DAY_DISCUSSION`, and `DAY_VOTING`, and omitted for `WAITING` and `FINISHED`. `server_time` is generated with each snapshot so clients can display the absolute deadline without trusting their local clock. `updated_at` remains the time of the most recent room event and can therefore be older than `server_time` on a new subscription.
 
 ### Chat
 
@@ -113,6 +118,16 @@ Malformed client events and invalid room actions produce an error envelope for t
 
 The state layer remains authoritative for every condition shown in this table.
 
+## Deadline Semantics
+
+Phase expiry is an internal room event and is not an accepted client event. The JSON client-event schema intentionally does not contain `phase_timeout`.
+
+- At the night deadline, every eligible living player without an action receives a pass before normal night resolution.
+- At the discussion deadline, the room enters voting as if voting had started without a player initiator.
+- At the voting deadline, every living player without a vote receives an abstention before normal vote resolution.
+- A manual transition or early completion replaces the old absolute deadline; the actor cancels its previous timer.
+- A phase timeout received before its current deadline is rejected by the state layer.
+
 ## Public Log Types
 
 State snapshots may contain up to 100 chronological public log entries:
@@ -126,6 +141,7 @@ State snapshots may contain up to 100 chronological public log entries:
 - `player_executed`
 - `vote_no_execution`
 - `shooter_fired`
+- `phase_timed_out`
 - `game_finished`
 
-Entries contain their type, round, timestamp, and only the relevant player, target, winner, or reason fields.
+Entries contain their type, round, timestamp, and only the relevant phase, player, target, winner, or reason fields. `phase_timed_out` includes the expired `phase`.

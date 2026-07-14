@@ -281,6 +281,139 @@ func TestReconnectRejectsInvalidToken(t *testing.T) {
 	}
 }
 
+func TestStartGamePublishesServerAuthoritativeNightDeadline(t *testing.T) {
+	state := readyRoomWithPlayers(t, []string{"owner", "guest-1", "guest-2"})
+	state.phaseDurations = PhaseDurations{
+		Night:         45 * time.Second,
+		DayDiscussion: time.Minute,
+		DayVoting:     30 * time.Second,
+	}
+	startedAt := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
+
+	envelope, err := state.Apply(Event{Type: EventStartGame, PlayerID: "owner", At: startedAt})
+	if err != nil {
+		t.Fatalf("start game: %v", err)
+	}
+
+	if !envelope.State.PhaseStartedAt.Equal(startedAt) {
+		t.Fatalf("phase started at = %s, want %s", envelope.State.PhaseStartedAt, startedAt)
+	}
+	if envelope.State.PhaseDeadline == nil {
+		t.Fatal("night deadline is missing")
+	}
+	wantDeadline := startedAt.Add(45 * time.Second)
+	if !envelope.State.PhaseDeadline.Equal(wantDeadline) {
+		t.Fatalf("phase deadline = %s, want %s", envelope.State.PhaseDeadline, wantDeadline)
+	}
+	if envelope.State.ServerTime.IsZero() {
+		t.Fatal("server time is missing")
+	}
+}
+
+func TestStateRejectsPhaseTimeoutBeforeDeadline(t *testing.T) {
+	state, deadline := timedGameState(PhaseNight, map[string]Role{
+		"owner":     RoleKiller,
+		"detective": RoleDetective,
+		"villager":  RoleVillager,
+	})
+
+	_, err := state.Apply(Event{Type: EventPhaseTimeout, At: deadline.Add(-time.Nanosecond)})
+	if !errors.Is(err, ErrPhaseDeadlineNotReached) {
+		t.Fatalf("err = %v, want %v", err, ErrPhaseDeadlineNotReached)
+	}
+	if state.phase != PhaseNight {
+		t.Fatalf("phase = %s, want unchanged %s", state.phase, PhaseNight)
+	}
+}
+
+func TestNightTimeoutPassesMissingActionsAndStartsDiscussion(t *testing.T) {
+	state, deadline := timedGameState(PhaseNight, map[string]Role{
+		"owner":     RoleKiller,
+		"detective": RoleDetective,
+		"doctor":    RoleDoctor,
+		"villager":  RoleVillager,
+	})
+
+	envelope, err := state.Apply(Event{Type: EventPhaseTimeout, At: deadline})
+	if err != nil {
+		t.Fatalf("expire night: %v", err)
+	}
+	if envelope.State.Phase != PhaseDayDiscussion {
+		t.Fatalf("phase = %s, want %s", envelope.State.Phase, PhaseDayDiscussion)
+	}
+	for _, player := range state.players {
+		if !player.Alive {
+			t.Fatalf("player %s was eliminated even though every missing action should pass", player.ID)
+		}
+	}
+	assertLogContains(t, envelope.State.Log, LogPhaseTimedOut, PhaseNight)
+	assertLogContains(t, envelope.State.Log, LogNightNoElimination, "")
+	if envelope.State.PhaseDeadline == nil || !envelope.State.PhaseDeadline.Equal(deadline.Add(time.Minute)) {
+		t.Fatalf("discussion deadline = %v, want %s", envelope.State.PhaseDeadline, deadline.Add(time.Minute))
+	}
+}
+
+func TestDiscussionTimeoutStartsVoting(t *testing.T) {
+	state, deadline := timedGameState(PhaseDayDiscussion, map[string]Role{
+		"owner":     RoleVillager,
+		"killer":    RoleKiller,
+		"detective": RoleDetective,
+	})
+
+	envelope, err := state.Apply(Event{Type: EventPhaseTimeout, At: deadline})
+	if err != nil {
+		t.Fatalf("expire discussion: %v", err)
+	}
+	if envelope.State.Phase != PhaseDayVoting {
+		t.Fatalf("phase = %s, want %s", envelope.State.Phase, PhaseDayVoting)
+	}
+	assertLogContains(t, envelope.State.Log, LogPhaseTimedOut, PhaseDayDiscussion)
+	assertLogContains(t, envelope.State.Log, LogVotingStarted, "")
+}
+
+func TestVotingTimeoutAbstainsMissingVotesAndStartsNextNight(t *testing.T) {
+	state, deadline := timedGameState(PhaseDayVoting, map[string]Role{
+		"owner":     RoleVillager,
+		"killer":    RoleKiller,
+		"detective": RoleDetective,
+	})
+
+	envelope, err := state.Apply(Event{Type: EventPhaseTimeout, At: deadline})
+	if err != nil {
+		t.Fatalf("expire voting: %v", err)
+	}
+	if envelope.State.Phase != PhaseNight || envelope.State.Round != 2 {
+		t.Fatalf("phase/round = %s/%d, want %s/2", envelope.State.Phase, envelope.State.Round, PhaseNight)
+	}
+	assertLogContains(t, envelope.State.Log, LogPhaseTimedOut, PhaseDayVoting)
+	assertLogContains(t, envelope.State.Log, LogVoteNoExecution, "")
+	if envelope.State.PhaseDeadline == nil {
+		t.Fatal("next night deadline is missing")
+	}
+}
+
+func TestFinishedPhaseClearsDeadline(t *testing.T) {
+	state, _ := timedGameState(PhaseNight, map[string]Role{
+		"owner": RoleKiller,
+		"guest": RoleVillager,
+	})
+	finishedAt := time.Now().UTC()
+
+	envelope, err := state.Apply(Event{Type: EventNightAction, PlayerID: "owner", TargetID: "guest", At: finishedAt})
+	if err != nil {
+		t.Fatalf("killer action: %v", err)
+	}
+	if envelope.State.Phase != PhaseFinished {
+		t.Fatalf("phase = %s, want %s", envelope.State.Phase, PhaseFinished)
+	}
+	if envelope.State.PhaseDeadline != nil {
+		t.Fatalf("finished deadline = %s, want nil", envelope.State.PhaseDeadline)
+	}
+	if !envelope.State.PhaseStartedAt.Equal(finishedAt) {
+		t.Fatalf("finished phase started at = %s, want %s", envelope.State.PhaseStartedAt, finishedAt)
+	}
+}
+
 func readyRoom(t *testing.T) *State {
 	t.Helper()
 	return readyRoomWithPlayers(t, []string{"owner", "guest"})
@@ -327,6 +460,28 @@ func gameStateWithRoles(phase Phase, roles map[string]Role) *State {
 		}
 	}
 	return state
+}
+
+func timedGameState(phase Phase, roles map[string]Role) (*State, time.Time) {
+	state := gameStateWithRoles(phase, roles)
+	state.phaseDurations = PhaseDurations{
+		Night:         30 * time.Second,
+		DayDiscussion: time.Minute,
+		DayVoting:     20 * time.Second,
+	}
+	startedAt := time.Date(2031, time.February, 3, 4, 5, 6, 0, time.UTC)
+	state.enterPhase(phase, startedAt)
+	return state, state.phaseDeadline
+}
+
+func assertLogContains(t *testing.T, entries []LogEntry, logType LogType, phase Phase) {
+	t.Helper()
+	for _, entry := range entries {
+		if entry.Type == logType && (phase == "" || entry.Phase == phase) {
+			return
+		}
+	}
+	t.Fatalf("log does not contain type %s with phase %s: %#v", logType, phase, entries)
 }
 
 func playerView(t *testing.T, snapshot *Snapshot, playerID string) PlayerView {

@@ -10,9 +10,10 @@ import (
 const DefaultRoomIdleTimeout = 30 * time.Minute
 
 type Hub struct {
-	mu          sync.Mutex
-	rooms       map[string]*Actor
-	idleTimeout time.Duration
+	mu             sync.Mutex
+	rooms          map[string]*Actor
+	idleTimeout    time.Duration
+	phaseDurations PhaseDurations
 }
 
 type HubOption func(*Hub)
@@ -23,13 +24,23 @@ func WithRoomIdleTimeout(timeout time.Duration) HubOption {
 	}
 }
 
+func WithPhaseDurations(durations PhaseDurations) HubOption {
+	return func(h *Hub) {
+		h.phaseDurations = durations
+	}
+}
+
 func NewHub(options ...HubOption) *Hub {
 	hub := &Hub{
-		rooms:       make(map[string]*Actor),
-		idleTimeout: DefaultRoomIdleTimeout,
+		rooms:          make(map[string]*Actor),
+		idleTimeout:    DefaultRoomIdleTimeout,
+		phaseDurations: DefaultPhaseDurations(),
 	}
 	for _, option := range options {
 		option(hub)
+	}
+	if err := hub.phaseDurations.Validate(); err != nil {
+		panic(err)
 	}
 	return hub
 }
@@ -46,7 +57,7 @@ func (h *Hub) GetOrCreate(roomID string) *Actor {
 	}
 
 	var actor *Actor
-	actor = newActor(roomID, h.idleTimeout, func() {
+	actor = newActor(roomID, h.idleTimeout, h.phaseDurations, func() {
 		h.remove(roomID, actor)
 	})
 	h.rooms[roomID] = actor

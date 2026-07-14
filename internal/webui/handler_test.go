@@ -80,3 +80,23 @@ func TestHandlerReturnsNotFoundForUnknownAsset(t *testing.T) {
 		t.Fatalf("status = %d, want %d", response.Code, http.StatusNotFound)
 	}
 }
+
+func TestGameClientRendersServerDeadlineCountdown(t *testing.T) {
+	index, err := assets.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	app, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatalf("read app: %v", err)
+	}
+
+	if !strings.Contains(string(index), `id="phase-countdown"`) {
+		t.Fatal("game client is missing phase countdown element")
+	}
+	for _, field := range []string{"phase_deadline", "server_time"} {
+		if !strings.Contains(string(app), field) {
+			t.Fatalf("game client does not consume %s", field)
+		}
+	}
+}

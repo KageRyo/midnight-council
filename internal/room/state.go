@@ -18,31 +18,35 @@ const (
 )
 
 var (
-	ErrPlayerIDRequired       = errors.New("player id is required")
-	ErrPlayerNameRequired     = errors.New("player name is required")
-	ErrPlayerNotFound         = errors.New("player not found")
-	ErrReconnectTokenRequired = errors.New("reconnect token is required")
-	ErrInvalidReconnectToken  = errors.New("reconnect token is invalid")
-	ErrOwnerOnly              = errors.New("only the room owner can perform this action")
-	ErrRoomNotWaiting         = errors.New("room is not waiting")
-	ErrRoomNotJoinable        = errors.New("room is not joinable")
-	ErrWrongPhase             = errors.New("action is not allowed in the current phase")
-	ErrGameFinished           = errors.New("game is already finished")
-	ErrNotEnoughPlayers       = errors.New("not enough players to start")
-	ErrPlayersNotReady        = errors.New("all non-owner players must be ready")
-	ErrEmptyMessage           = errors.New("message is empty")
-	ErrMessageTooLong         = errors.New("message is too long")
-	ErrPlayerDead             = errors.New("player is dead")
-	ErrInvalidTarget          = errors.New("target is invalid")
-	ErrSelfTargetNotAllowed   = errors.New("self target is not allowed")
-	ErrRoleHasNoNightAction   = errors.New("role has no night action")
-	ErrShooterOnly            = errors.New("only the shooter can perform this action")
-	ErrShooterAlreadyUsed     = errors.New("shooter action has already been used")
+	ErrPlayerIDRequired        = errors.New("player id is required")
+	ErrPlayerNameRequired      = errors.New("player name is required")
+	ErrPlayerNotFound          = errors.New("player not found")
+	ErrReconnectTokenRequired  = errors.New("reconnect token is required")
+	ErrInvalidReconnectToken   = errors.New("reconnect token is invalid")
+	ErrOwnerOnly               = errors.New("only the room owner can perform this action")
+	ErrRoomNotWaiting          = errors.New("room is not waiting")
+	ErrRoomNotJoinable         = errors.New("room is not joinable")
+	ErrWrongPhase              = errors.New("action is not allowed in the current phase")
+	ErrGameFinished            = errors.New("game is already finished")
+	ErrNotEnoughPlayers        = errors.New("not enough players to start")
+	ErrPlayersNotReady         = errors.New("all non-owner players must be ready")
+	ErrEmptyMessage            = errors.New("message is empty")
+	ErrMessageTooLong          = errors.New("message is too long")
+	ErrPlayerDead              = errors.New("player is dead")
+	ErrInvalidTarget           = errors.New("target is invalid")
+	ErrSelfTargetNotAllowed    = errors.New("self target is not allowed")
+	ErrRoleHasNoNightAction    = errors.New("role has no night action")
+	ErrShooterOnly             = errors.New("only the shooter can perform this action")
+	ErrShooterAlreadyUsed      = errors.New("shooter action has already been used")
+	ErrPhaseDeadlineNotReached = errors.New("phase deadline has not been reached")
 )
 
 type State struct {
 	roomID         string
 	phase          Phase
+	phaseStartedAt time.Time
+	phaseDeadline  time.Time
+	phaseDurations PhaseDurations
 	ownerID        string
 	players        map[string]*Player
 	round          int
@@ -55,10 +59,19 @@ type State struct {
 }
 
 func NewState(roomID string) *State {
+	return newState(roomID, DefaultPhaseDurations())
+}
+
+func newState(roomID string, phaseDurations PhaseDurations) *State {
+	if err := phaseDurations.Validate(); err != nil {
+		panic(err)
+	}
 	now := time.Now().UTC()
 	return &State{
 		roomID:         roomID,
 		phase:          PhaseWaiting,
+		phaseStartedAt: now,
+		phaseDurations: phaseDurations,
 		players:        make(map[string]*Player),
 		nightActions:   make(map[string]NightAction),
 		votes:          make(map[string]string),
@@ -93,6 +106,8 @@ func (s *State) Apply(event Event) (*Envelope, error) {
 		return s.applyVote(event)
 	case EventShoot:
 		return s.applyShoot(event)
+	case EventPhaseTimeout:
+		return s.applyPhaseTimeout(event)
 	default:
 		return nil, fmt.Errorf("unknown room event: %s", event.Type)
 	}
@@ -131,16 +146,24 @@ func (s *State) Snapshot() Snapshot {
 
 	entries := make([]LogEntry, len(s.log))
 	copy(entries, s.log)
+	var phaseDeadline *time.Time
+	if !s.phaseDeadline.IsZero() {
+		deadline := s.phaseDeadline
+		phaseDeadline = &deadline
+	}
 
 	return Snapshot{
-		RoomID:    s.roomID,
-		OwnerID:   s.ownerID,
-		Phase:     s.phase,
-		Round:     s.round,
-		Players:   players,
-		Result:    s.result,
-		Log:       entries,
-		UpdatedAt: s.updatedAt,
+		RoomID:         s.roomID,
+		OwnerID:        s.ownerID,
+		Phase:          s.phase,
+		PhaseStartedAt: s.phaseStartedAt,
+		PhaseDeadline:  phaseDeadline,
+		Round:          s.round,
+		Players:        players,
+		Result:         s.result,
+		Log:            entries,
+		UpdatedAt:      s.updatedAt,
+		ServerTime:     time.Now().UTC(),
 	}
 }
 
@@ -316,7 +339,7 @@ func (s *State) applyStartGame(event Event) (*Envelope, error) {
 		player.ShooterUsed = false
 	}
 
-	s.phase = PhaseNight
+	s.enterPhase(PhaseNight, event.At)
 	s.round = 1
 	s.nightActions = make(map[string]NightAction)
 	s.votes = make(map[string]string)
@@ -436,9 +459,7 @@ func (s *State) applyStartVote(event Event) (*Envelope, error) {
 		return nil, ErrOwnerOnly
 	}
 
-	s.phase = PhaseDayVoting
-	s.votes = make(map[string]string)
-	s.appendLog(LogVotingStarted, event.At, LogEntry{PlayerID: event.PlayerID})
+	s.startVoting(event.At, event.PlayerID)
 	s.touch(event.At)
 	return stateEnvelope(s.Snapshot()), nil
 }
@@ -509,6 +530,46 @@ func (s *State) applyShoot(event Event) (*Envelope, error) {
 	return stateEnvelope(s.Snapshot()), nil
 }
 
+func (s *State) applyPhaseTimeout(event Event) (*Envelope, error) {
+	if s.phaseDeadline.IsZero() {
+		return nil, ErrWrongPhase
+	}
+	if event.At.Before(s.phaseDeadline) {
+		return nil, ErrPhaseDeadlineNotReached
+	}
+
+	expiredPhase := s.phase
+	s.appendLog(LogPhaseTimedOut, event.At, LogEntry{Phase: expiredPhase})
+	switch expiredPhase {
+	case PhaseNight:
+		for _, player := range s.players {
+			if player.Alive && hasNightAction(player.Role) && !s.nightActionSubmitted(player.ID) {
+				s.nightActions[player.ID] = NightAction{
+					PlayerID: player.ID,
+					Type:     NightActionPass,
+				}
+			}
+		}
+		s.resolveNight(event.At)
+	case PhaseDayDiscussion:
+		s.startVoting(event.At, "")
+	case PhaseDayVoting:
+		for _, player := range s.players {
+			if player.Alive {
+				if _, voted := s.votes[player.ID]; !voted {
+					s.votes[player.ID] = ""
+				}
+			}
+		}
+		s.resolveVote(event.At)
+	default:
+		return nil, ErrWrongPhase
+	}
+
+	s.touch(event.At)
+	return stateEnvelope(s.Snapshot()), nil
+}
+
 func (s *State) resolveNight(at time.Time) {
 	protected := make(map[string]bool)
 	for _, action := range s.sortedNightActions() {
@@ -547,7 +608,7 @@ func (s *State) resolveNight(at time.Time) {
 		return
 	}
 
-	s.phase = PhaseDayDiscussion
+	s.enterPhase(PhaseDayDiscussion, at)
 	s.votes = make(map[string]string)
 	s.appendLog(LogDayStarted, at, LogEntry{})
 }
@@ -580,7 +641,7 @@ func (s *State) resolveVote(at time.Time) {
 	}
 
 	s.round++
-	s.phase = PhaseNight
+	s.enterPhase(PhaseNight, at)
 	s.nightActions = make(map[string]NightAction)
 	s.appendLog(LogNightStarted, at, LogEntry{})
 }
@@ -630,7 +691,7 @@ func (s *State) checkWin(at time.Time) bool {
 }
 
 func (s *State) finish(winner Winner, reason string, at time.Time) {
-	s.phase = PhaseFinished
+	s.enterPhase(PhaseFinished, at)
 	s.result = &GameResult{
 		Winner:     winner,
 		Reason:     reason,
@@ -755,6 +816,24 @@ func (s *State) appendLog(logType LogType, at time.Time, entry LogEntry) {
 	s.log = append(s.log, entry)
 	if len(s.log) > MaxEventLogEntries {
 		s.log = s.log[len(s.log)-MaxEventLogEntries:]
+	}
+}
+
+func (s *State) startVoting(at time.Time, playerID string) {
+	s.enterPhase(PhaseDayVoting, at)
+	s.votes = make(map[string]string)
+	s.appendLog(LogVotingStarted, at, LogEntry{PlayerID: playerID})
+}
+
+func (s *State) enterPhase(phase Phase, at time.Time) {
+	at = at.UTC()
+	s.phase = phase
+	s.phaseStartedAt = at
+	duration := s.phaseDurations.durationFor(phase)
+	if duration > 0 {
+		s.phaseDeadline = at.Add(duration)
+	} else {
+		s.phaseDeadline = time.Time{}
 	}
 }
 

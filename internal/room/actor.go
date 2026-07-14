@@ -35,15 +35,15 @@ type result struct {
 }
 
 func NewActor(roomID string) *Actor {
-	return newActor(roomID, 0, nil)
+	return newActor(roomID, 0, DefaultPhaseDurations(), nil)
 }
 
-func newActor(roomID string, idleTimeout time.Duration, onIdle func()) *Actor {
+func newActor(roomID string, idleTimeout time.Duration, phaseDurations PhaseDurations, onIdle func()) *Actor {
 	actor := &Actor{
 		inbox: make(chan command),
 		done:  make(chan struct{}),
 	}
-	go actor.run(NewState(roomID), idleTimeout, onIdle)
+	go actor.run(newState(roomID, phaseDurations), idleTimeout, onIdle)
 	return actor
 }
 
@@ -106,6 +106,8 @@ func (a *Actor) run(state *State, idleTimeout time.Duration, onIdle func()) {
 	subscribers := make(map[string]subscription)
 	var idleTimer *time.Timer
 	var idleC <-chan time.Time
+	var phaseTimer *time.Timer
+	var phaseC <-chan time.Time
 
 	stopIdleTimer := func() {
 		if idleTimer == nil {
@@ -140,8 +142,45 @@ func (a *Actor) run(state *State, idleTimeout time.Duration, onIdle func()) {
 		idleTimer.Reset(idleTimeout)
 	}
 
+	stopPhaseTimer := func() {
+		if phaseTimer == nil {
+			return
+		}
+		if !phaseTimer.Stop() {
+			select {
+			case <-phaseTimer.C:
+			default:
+			}
+		}
+		phaseTimer = nil
+		phaseC = nil
+	}
+
+	resetPhaseTimer := func() {
+		if state.phaseDeadline.IsZero() {
+			stopPhaseTimer()
+			return
+		}
+
+		remaining := time.Until(state.phaseDeadline)
+		if phaseTimer == nil {
+			phaseTimer = time.NewTimer(remaining)
+			phaseC = phaseTimer.C
+			return
+		}
+		if !phaseTimer.Stop() {
+			select {
+			case <-phaseTimer.C:
+			default:
+			}
+		}
+		phaseTimer.Reset(remaining)
+	}
+
 	defer stopIdleTimer()
+	defer stopPhaseTimer()
 	resetIdleTimer()
+	resetPhaseTimer()
 
 	for {
 		select {
@@ -151,6 +190,19 @@ func (a *Actor) run(state *State, idleTimeout time.Duration, onIdle func()) {
 				onIdle()
 			}
 			return
+		case <-phaseC:
+			subscriberCount := len(subscribers)
+			envelope, err := state.Apply(Event{
+				Type: EventPhaseTimeout,
+				At:   time.Now().UTC(),
+			})
+			if err == nil && envelope != nil {
+				broadcast(state, subscribers, *envelope)
+			}
+			resetPhaseTimer()
+			if subscriberCount > 0 && len(subscribers) == 0 {
+				resetIdleTimer()
+			}
 		case cmd := <-a.inbox:
 			switch {
 			case cmd.event != nil:
@@ -175,6 +227,7 @@ func (a *Actor) run(state *State, idleTimeout time.Duration, onIdle func()) {
 				}
 			}
 			resetIdleTimer()
+			resetPhaseTimer()
 		}
 	}
 }

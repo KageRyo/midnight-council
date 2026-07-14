@@ -154,6 +154,70 @@ func TestHandlerRequiresReconnectTokenForExistingPlayer(t *testing.T) {
 	})
 }
 
+func TestHandlerBroadcastsAutomaticPhaseProgression(t *testing.T) {
+	durations := room.PhaseDurations{
+		Night:         60 * time.Millisecond,
+		DayDiscussion: 80 * time.Millisecond,
+		DayVoting:     60 * time.Millisecond,
+	}
+	server := httptest.NewServer(NewHandler(room.NewHub(room.WithPhaseDurations(durations))))
+	defer server.Close()
+
+	clients := []*testClient{
+		connectClient(t, server.URL, "p1", "Player 1"),
+		connectClient(t, server.URL, "p2", "Player 2"),
+		connectClient(t, server.URL, "p3", "Player 3"),
+	}
+	defer closeClients(clients)
+
+	readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return len(state.Players) == len(clients)
+	})
+	for _, client := range clients[1:] {
+		writeClientEvent(t, client, map[string]any{"type": "ready", "ready": true})
+	}
+	readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return nonOwnerPlayersReady(state)
+	})
+	writeClientEvent(t, clients[0], map[string]any{"type": "start_game"})
+
+	night := readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.Phase == room.PhaseNight && state.Round == 1
+	})
+	assertSnapshotDeadline(t, night.State, durations.Night)
+
+	discussion := readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.Phase == room.PhaseDayDiscussion
+	})
+	assertSnapshotDeadline(t, discussion.State, durations.DayDiscussion)
+
+	voting := readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.Phase == room.PhaseDayVoting
+	})
+	assertSnapshotDeadline(t, voting.State, durations.DayVoting)
+
+	nextNight := readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.Phase == room.PhaseNight && state.Round == 2
+	})
+	assertSnapshotDeadline(t, nextNight.State, durations.Night)
+}
+
+func assertSnapshotDeadline(t *testing.T, state *room.Snapshot, duration time.Duration) {
+	t.Helper()
+	if state.PhaseStartedAt.IsZero() {
+		t.Fatal("phase_started_at is missing")
+	}
+	if state.PhaseDeadline == nil {
+		t.Fatal("phase_deadline is missing")
+	}
+	if got := state.PhaseDeadline.Sub(state.PhaseStartedAt); got != duration {
+		t.Fatalf("phase duration = %s, want %s", got, duration)
+	}
+	if state.ServerTime.IsZero() {
+		t.Fatal("server_time is missing")
+	}
+}
+
 func connectClient(t *testing.T, serverURL, playerID, playerName string) *testClient {
 	t.Helper()
 	return connectClientWithToken(t, serverURL, playerID, playerName, "")

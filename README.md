@@ -18,6 +18,7 @@ The Go server and its embedded web client already support a complete playable lo
   - `DOCTOR`
   - `SHOOTER`
 - Day/night state machine
+- Server-authoritative phase deadlines and automatic progression
 - Night actions and pass events
 - Day voting and execution
 - Shooter one-shot day action
@@ -29,8 +30,9 @@ The Go server and its embedded web client already support a complete playable lo
 - Unit-tested room state rules
 - WebSocket integration tests for a full multiplayer game flow
 - Browser session recovery through local reconnect-token storage
+- Server-synchronized phase countdown on desktop and mobile
 
-Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, server-authoritative phase timers, moderation, rate limiting, or horizontal scaling.
+Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, moderation, rate limiting, or horizontal scaling.
 
 See [`docs/architecture.md`](docs/architecture.md), [`docs/web-client.md`](docs/web-client.md), [`docs/websocket-protocol.md`](docs/websocket-protocol.md), and [`docs/roadmap.md`](docs/roadmap.md) for design details and upcoming work.
 
@@ -66,6 +68,20 @@ Rooms with no active WebSocket subscribers are removed after `30m` by default. O
 ROOM_IDLE_TIMEOUT=5m make run
 ```
 
+Active game phases have server-authoritative deadlines. Defaults and overrides are:
+
+| Environment variable | Default | Phase |
+| --- | ---: | --- |
+| `NIGHT_DURATION` | `1m30s` | Night actions |
+| `DAY_DISCUSSION_DURATION` | `5m` | Public discussion |
+| `DAY_VOTING_DURATION` | `1m` | Voting |
+
+All phase durations must be positive Go duration strings. For a fast local timing check:
+
+```bash
+NIGHT_DURATION=10s DAY_DISCUSSION_DURATION=15s DAY_VOTING_DURATION=10s make run
+```
+
 Open the game client after starting the server:
 
 ```text
@@ -93,6 +109,7 @@ The client supports:
 - public discussion, voting, abstaining, and shooter actions
 - public game log and final role reveal
 - reconnect-token recovery after refresh
+- countdown synchronized to server time
 - desktop and mobile layouts
 
 The browser stores a generated `player_id`, display name, and reconnect token per room in local storage. The reconnect token is never displayed or included in public room state. Chat is live-only and is not replayed after a refresh; authoritative game events remain available in the room log.
@@ -130,6 +147,9 @@ The server broadcasts envelopes:
   "state": {
     "room_id": "demo",
     "phase": "NIGHT",
+    "phase_started_at": "2026-07-14T09:00:00Z",
+    "phase_deadline": "2026-07-14T09:01:30Z",
+    "server_time": "2026-07-14T09:00:10Z",
     "round": 1,
     "players": []
   },
@@ -206,11 +226,11 @@ Shooter day action:
 2. Non-owner players send `ready`.
 3. The owner sends `start_game`.
 4. The server shuffles roles and enters `NIGHT`.
-5. Alive `KILLER`, `DETECTIVE`, and `DOCTOR` players submit `night_action` or `night_pass`.
-6. The server resolves protection, kills, and detective results.
+5. Alive `KILLER`, `DETECTIVE`, and `DOCTOR` players submit `night_action` or `night_pass`; missing actions become passes when the night deadline expires.
+6. The server resolves protection, kills, and detective results when every required action is present or time expires.
 7. If no side has won, the room enters `DAY_DISCUSSION`.
-8. The owner sends `start_vote`.
-9. Alive players vote. When all living players have voted, the server resolves execution.
+8. The owner sends `start_vote`, or the discussion deadline starts voting automatically.
+9. Alive players vote. The server resolves execution when everyone has voted; missing votes become abstentions at the voting deadline.
 10. The server either finishes the game or starts the next night.
 
 Win rules:

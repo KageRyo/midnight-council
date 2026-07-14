@@ -31,7 +31,7 @@ Invitation links use `?room={room_id}`. They include only the public room ID and
 
 The client treats each server state envelope as authoritative and re-renders these areas:
 
-- connection, room, phase, and round status;
+- connection, room, phase, round, and server-synchronized countdown status;
 - public player seats and connection state;
 - the current player's private role and life state;
 - detective investigation results;
@@ -47,12 +47,18 @@ It does not calculate kills, vote results, role assignments, or winners locally.
 | Phase | Browser actions |
 | --- | --- |
 | `WAITING` | Non-owner ready toggle; owner start when eligible; chat |
-| `NIGHT` | Role-specific target action or pass; chat for living players |
-| `DAY_DISCUSSION` | Owner starts voting; shooter may fire; chat |
-| `DAY_VOTING` | Living players vote or abstain; shooter may fire; chat |
+| `NIGHT` | Role-specific target action or pass; missing actions pass at timeout; chat for living players |
+| `DAY_DISCUSSION` | Owner may start voting early; deadline starts it automatically; shooter may fire; chat |
+| `DAY_VOTING` | Living players vote or abstain; missing votes abstain at timeout; shooter may fire; chat |
 | `FINISHED` | Final result and roles; chat |
 
 Night actors can change their submitted target until the last required action causes resolution. Voters can similarly change a non-empty vote until the last living player submits. The current private projection cannot distinguish a submitted abstention from no vote, so the UI continues to describe abstention as available until resolution.
+
+## Server-Synchronized Countdown
+
+Timed snapshots contain `phase_started_at`, `phase_deadline`, and `server_time`. On receipt, the browser calculates the offset between server time and the local clock, then renders the remaining time against the absolute deadline. The display updates four times per second and switches to an urgent treatment for the last ten seconds.
+
+At `00:00`, the browser stops its local display and waits for the next authoritative state broadcast. It does not submit timeout events, fill missing actions, calculate a result, or change phases locally. Reconnect snapshots carry the same absolute deadline, so a returning player immediately sees the current remaining time. The timer stops displaying synchronized time if the WebSocket disconnects.
 
 ## Browser Storage and Reconnect
 
@@ -99,6 +105,7 @@ For a manual multiplayer check:
 4. Submit or pass all required night actions.
 5. Exercise discussion, voting, and any available shooter action.
 6. Refresh one browser and confirm the reconnect prompt restores its seat.
+7. Run with short phase durations and confirm missing actions, discussion, and votes advance automatically.
 
 The Go suite tests embedded assets and the complete WebSocket game flow:
 
@@ -117,7 +124,6 @@ node --check internal/webui/static/app.js
 - no automatic reconnect loop after a live connection drops;
 - no retained chat history;
 - no audible cues or notifications;
-- no phase deadline or countdown;
 - no room restart after `FINISHED`;
 - no frontend unit-test framework or committed browser-test suite;
 - browser-generated player IDs are identities only within an in-memory room, not accounts.

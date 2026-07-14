@@ -52,14 +52,14 @@
       label: "白天討論",
       kicker: "OPEN DISCUSSION",
       title: "晨光下的辯論",
-      description: "檢視昨夜結果、交換線索。準備好後由房主開始表決。",
+      description: "檢視昨夜結果、交換線索。房主可提早表決，倒數結束也會自動進入投票。",
       symbol: "☼",
     },
     DAY_VOTING: {
       label: "白天表決",
       kicker: "COUNCIL VOTE",
       title: "做出你的選擇",
-      description: "所有存活玩家都必須投票或棄權；最高票且未平票者將被處決。",
+      description: "所有存活玩家都必須投票或棄權；倒數結束時，尚未投票者會自動棄權。",
       symbol: "⌁",
     },
     FINISHED: {
@@ -81,6 +81,7 @@
     player_executed: "議會執行處決",
     vote_no_execution: "本輪無人被處決",
     shooter_fired: "槍手開火",
+    phase_timed_out: "階段時間結束",
     game_finished: "遊戲結束",
   };
 
@@ -94,6 +95,8 @@
     chats: [],
     intentionallyClosed: false,
     toastTimer: null,
+    countdownInterval: null,
+    serverClockOffset: 0,
   };
 
   const ui = Object.fromEntries(
@@ -111,6 +114,8 @@
       "game-view",
       "room-code",
       "copy-room-button",
+      "countdown-meta",
+      "phase-countdown",
       "phase-label",
       "round-label",
       "leave-button",
@@ -266,6 +271,7 @@
         if (!envelope.state) {
           return;
         }
+        syncServerClock(envelope.state.server_time);
         app.state = envelope.state;
         app.private = envelope.private || null;
         if (app.private?.reconnect_token) {
@@ -314,6 +320,7 @@
     }
 
     setConnection("offline", "連線中斷");
+    stopCountdown(false);
     if (app.state) {
       showToast("與伺服器的連線已中斷。重新整理後可使用保存的憑證重連。", true);
       disableGameInputs();
@@ -339,6 +346,7 @@
     app.state = null;
     app.private = null;
     app.chats = [];
+    stopCountdown();
     ui.gameView.hidden = true;
     ui.joinView.hidden = false;
     ui.roomId.value = app.roomID;
@@ -416,6 +424,7 @@
     renderActions();
     renderChat();
     renderLog();
+    startCountdown();
   }
 
   function renderRoomHeader() {
@@ -548,7 +557,7 @@
         return role === "DOCTOR" || player.id !== app.playerID;
       });
       ui.nightActionHint.textContent = app.private?.action_required
-        ? "你的行動尚未提交。"
+        ? "你的行動尚未提交；倒數結束時將自動跳過。"
         : "行動已提交；夜晚結算前仍可變更目標。";
     } else if (phase === "NIGHT" && app.private?.alive) {
       ui.phaseDescription.textContent = "你在今晚沒有指定行動。等待其他角色完成秘密行動。";
@@ -560,8 +569,8 @@
       ui.discussionActions.hidden = false;
       ui.startVoteButton.hidden = !isOwner;
       ui.discussionHint.textContent = isOwner
-        ? "確認大家討論完畢後，即可開始表決。"
-        : "交換線索並等待房主開始表決。";
+        ? "確認大家討論完畢後可提早表決，否則倒數結束會自動開始。"
+        : "交換線索；房主提早開始或倒數結束後將進入表決。";
     }
 
     if (phase === "DAY_VOTING" && app.private?.can_vote) {
@@ -571,7 +580,7 @@
         ui.voteTarget.value = app.private.voted_for;
         ui.voteHint.textContent = "表決已送出；結算前仍可改票。";
       } else {
-        ui.voteHint.textContent = "也可以選擇棄權。所有存活玩家表態後會立即結算。";
+        ui.voteHint.textContent = "也可以選擇棄權；倒數結束時尚未投票者會自動棄權。";
       }
     } else if (phase === "DAY_VOTING" && !app.private?.alive) {
       ui.phaseDescription.textContent = "你已出局，無法參與表決。等待存活玩家完成投票。";
@@ -617,7 +626,7 @@
 
     const items = logs.slice().reverse().map((entry) => {
       const item = element("li", "event-item");
-      item.classList.toggle("important", ["game_started", "game_finished", "player_executed", "night_eliminated"].includes(entry.type));
+      item.classList.toggle("important", ["game_started", "game_finished", "player_executed", "night_eliminated", "phase_timed_out"].includes(entry.type));
       const title = element("strong", "", logLabels[entry.type] || entry.type);
       const detail = element("span", "", describeLog(entry));
       item.append(title, detail);
@@ -648,6 +657,8 @@
         return "平票或無有效票數";
       case "shooter_fired":
         return `${playerName || "槍手"} 對 ${targetName || "一名玩家"} 開槍`;
+      case "phase_timed_out":
+        return `${phases[entry.phase]?.label || "目前階段"}倒數結束，伺服器已自動推進`;
       case "game_finished":
         return entry.winner === "VILLAGERS" ? "議會陣營獲勝" : "殺手陣營獲勝";
       default:
@@ -671,6 +682,66 @@
         control.disabled = true;
       }
     });
+  }
+
+  function syncServerClock(serverTime) {
+    const parsed = Date.parse(serverTime);
+    if (Number.isFinite(parsed)) {
+      app.serverClockOffset = parsed - Date.now();
+    }
+  }
+
+  function startCountdown() {
+    stopCountdown();
+    const deadline = Date.parse(app.state?.phase_deadline);
+    if (!Number.isFinite(deadline)) {
+      return;
+    }
+
+    ui.countdownMeta.hidden = false;
+    const update = () => {
+      const remaining = Math.max(0, deadline - (Date.now() + app.serverClockOffset));
+      ui.phaseCountdown.textContent = formatCountdown(remaining);
+      switch (true) {
+        case remaining <= 0:
+          ui.countdownMeta.dataset.urgency = "expired";
+          ui.countdownMeta.title = "時間已到，等待伺服器結算";
+          window.clearInterval(app.countdownInterval);
+          app.countdownInterval = null;
+          break;
+        case remaining <= 10_000:
+          ui.countdownMeta.dataset.urgency = "urgent";
+          ui.countdownMeta.title = "階段即將結束";
+          break;
+        default:
+          ui.countdownMeta.dataset.urgency = "normal";
+          ui.countdownMeta.title = "伺服器權威階段倒數";
+      }
+    };
+
+    update();
+    if (deadline > Date.now() + app.serverClockOffset) {
+      app.countdownInterval = window.setInterval(update, 250);
+    }
+  }
+
+  function stopCountdown(hide = true) {
+    window.clearInterval(app.countdownInterval);
+    app.countdownInterval = null;
+    if (hide) {
+      ui.countdownMeta.hidden = true;
+    } else {
+      ui.phaseCountdown.textContent = "--:--";
+      ui.countdownMeta.dataset.urgency = "expired";
+      ui.countdownMeta.title = "連線中斷，倒數已停止同步";
+    }
+  }
+
+  function formatCountdown(milliseconds) {
+    const totalSeconds = Math.ceil(milliseconds / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
   }
 
   function enableGameInputs() {

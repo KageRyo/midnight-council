@@ -15,16 +15,17 @@ const (
 type EventType string
 
 const (
-	EventJoin        EventType = "join"
-	EventLeave       EventType = "leave"
-	EventReady       EventType = "ready"
-	EventStartGame   EventType = "start_game"
-	EventChat        EventType = "chat"
-	EventNightAction EventType = "night_action"
-	EventNightPass   EventType = "night_pass"
-	EventStartVote   EventType = "start_vote"
-	EventVote        EventType = "vote"
-	EventShoot       EventType = "shoot"
+	EventJoin         EventType = "join"
+	EventLeave        EventType = "leave"
+	EventReady        EventType = "ready"
+	EventStartGame    EventType = "start_game"
+	EventChat         EventType = "chat"
+	EventNightAction  EventType = "night_action"
+	EventNightPass    EventType = "night_pass"
+	EventStartVote    EventType = "start_vote"
+	EventVote         EventType = "vote"
+	EventShoot        EventType = "shoot"
+	EventPhaseTimeout EventType = "phase_timeout"
 )
 
 type Role string
@@ -65,6 +66,7 @@ const (
 	LogPlayerExecuted     LogType = "player_executed"
 	LogVoteNoExecution    LogType = "vote_no_execution"
 	LogShooterFired       LogType = "shooter_fired"
+	LogPhaseTimedOut      LogType = "phase_timed_out"
 	LogGameFinished       LogType = "game_finished"
 )
 
@@ -102,14 +104,17 @@ type PlayerView struct {
 }
 
 type Snapshot struct {
-	RoomID    string       `json:"room_id"`
-	OwnerID   string       `json:"owner_id"`
-	Phase     Phase        `json:"phase"`
-	Round     int          `json:"round"`
-	Players   []PlayerView `json:"players"`
-	Result    *GameResult  `json:"result,omitempty"`
-	Log       []LogEntry   `json:"log,omitempty"`
-	UpdatedAt time.Time    `json:"updated_at"`
+	RoomID         string       `json:"room_id"`
+	OwnerID        string       `json:"owner_id"`
+	Phase          Phase        `json:"phase"`
+	PhaseStartedAt time.Time    `json:"phase_started_at"`
+	PhaseDeadline  *time.Time   `json:"phase_deadline,omitempty"`
+	Round          int          `json:"round"`
+	Players        []PlayerView `json:"players"`
+	Result         *GameResult  `json:"result,omitempty"`
+	Log            []LogEntry   `json:"log,omitempty"`
+	UpdatedAt      time.Time    `json:"updated_at"`
+	ServerTime     time.Time    `json:"server_time"`
 }
 
 type PrivatePlayerView struct {
@@ -147,6 +152,7 @@ type GameResult struct {
 type LogEntry struct {
 	Type     LogType   `json:"type"`
 	Round    int       `json:"round"`
+	Phase    Phase     `json:"phase,omitempty"`
 	PlayerID string    `json:"player_id,omitempty"`
 	TargetID string    `json:"target_id,omitempty"`
 	Winner   Winner    `json:"winner,omitempty"`
