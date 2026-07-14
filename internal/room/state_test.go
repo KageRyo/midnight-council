@@ -353,6 +353,40 @@ func TestNightTimeoutPassesMissingActionsAndStartsDiscussion(t *testing.T) {
 	}
 }
 
+func TestNightTimeoutPreservesSubmittedActionsAndPassesOnlyMissingPlayers(t *testing.T) {
+	state, deadline := timedGameState(PhaseNight, map[string]Role{
+		"owner":     RoleKiller,
+		"detective": RoleDetective,
+		"doctor":    RoleDoctor,
+		"villager":  RoleVillager,
+	})
+
+	if _, err := state.Apply(Event{
+		Type:     EventNightAction,
+		PlayerID: "owner",
+		TargetID: "villager",
+		At:       deadline.Add(-time.Second),
+	}); err != nil {
+		t.Fatalf("submit killer action: %v", err)
+	}
+
+	envelope, err := state.Apply(Event{Type: EventPhaseTimeout, At: deadline})
+	if err != nil {
+		t.Fatalf("expire night: %v", err)
+	}
+	if state.players["villager"].Alive {
+		t.Fatal("submitted killer action was replaced instead of being resolved")
+	}
+	if len(state.investigations["detective"]) != 0 {
+		t.Fatal("missing detective action should have become a pass")
+	}
+	if envelope.State.Phase != PhaseDayDiscussion {
+		t.Fatalf("phase = %s, want %s", envelope.State.Phase, PhaseDayDiscussion)
+	}
+	assertLogContains(t, envelope.State.Log, LogPhaseTimedOut, PhaseNight)
+	assertLogContains(t, envelope.State.Log, LogNightEliminated, "")
+}
+
 func TestDiscussionTimeoutStartsVoting(t *testing.T) {
 	state, deadline := timedGameState(PhaseDayDiscussion, map[string]Role{
 		"owner":     RoleVillager,
@@ -390,6 +424,36 @@ func TestVotingTimeoutAbstainsMissingVotesAndStartsNextNight(t *testing.T) {
 	if envelope.State.PhaseDeadline == nil {
 		t.Fatal("next night deadline is missing")
 	}
+}
+
+func TestVotingTimeoutPreservesSubmittedVotesAndAbstainsOnlyMissingPlayers(t *testing.T) {
+	state, deadline := timedGameState(PhaseDayVoting, map[string]Role{
+		"owner":     RoleVillager,
+		"killer":    RoleKiller,
+		"detective": RoleDetective,
+	})
+
+	if _, err := state.Apply(Event{
+		Type:     EventVote,
+		PlayerID: "owner",
+		TargetID: "detective",
+		At:       deadline.Add(-time.Second),
+	}); err != nil {
+		t.Fatalf("submit vote: %v", err)
+	}
+
+	envelope, err := state.Apply(Event{Type: EventPhaseTimeout, At: deadline})
+	if err != nil {
+		t.Fatalf("expire voting: %v", err)
+	}
+	if state.players["detective"].Alive {
+		t.Fatal("submitted vote was replaced instead of being counted")
+	}
+	if envelope.State.Phase != PhaseFinished {
+		t.Fatalf("phase = %s, want %s after execution produces killer parity", envelope.State.Phase, PhaseFinished)
+	}
+	assertLogContains(t, envelope.State.Log, LogPhaseTimedOut, PhaseDayVoting)
+	assertLogContains(t, envelope.State.Log, LogPlayerExecuted, "")
 }
 
 func TestFinishedPhaseClearsDeadline(t *testing.T) {
