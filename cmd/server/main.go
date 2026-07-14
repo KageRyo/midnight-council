@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"midnight-council/internal/room"
+	"midnight-council/internal/webui"
 	"midnight-council/internal/ws"
 )
 
@@ -26,6 +27,7 @@ func main() {
 		_, _ = w.Write([]byte("ok"))
 	})
 	mux.Handle("/ws/rooms/", handler)
+	mux.Handle("/", webui.NewHandler())
 
 	server := &http.Server{
 		Addr:              addr,

@@ -3,4 +3,5 @@
 .env.*
 bin/
 coverage.out
-
+.playwright-cli/
+output/

@@ -1,12 +1,13 @@
 # midnight-council
 
-Midnight Council is a real-time social deduction game server prototype.
+Midnight Council is a browser-based, real-time social deduction game prototype inspired by classic night-and-day party games.
 
-The current backend is intentionally small, but it already models a complete playable loop: nickname-based join, room readiness, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, win detection, settlement, and reconnect-token based disconnect/reconnect.
+The Go server and its embedded web client already support a complete playable loop: nickname-based join, room readiness, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, win detection, settlement, and reconnect-token based disconnect/reconnect.
 
 ## Current Scope
 
 - Go HTTP/WebSocket game server
+- Embedded responsive web client with no frontend build step
 - Room actor per room
 - Server-authoritative game state
 - Public room snapshots plus per-player private state
@@ -27,10 +28,11 @@ The current backend is intentionally small, but it already models a complete pla
 - Strict WebSocket client event schema validation
 - Unit-tested room state rules
 - WebSocket integration tests for a full multiplayer game flow
+- Browser session recovery through local reconnect-token storage
 
-Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, timers, moderation, rate limiting, horizontal scaling, or a web frontend.
+Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, server-authoritative phase timers, moderation, rate limiting, or horizontal scaling.
 
-See `docs/roadmap.md` for the next implementation tasks.
+See [`docs/architecture.md`](docs/architecture.md), [`docs/web-client.md`](docs/web-client.md), [`docs/websocket-protocol.md`](docs/websocket-protocol.md), and [`docs/roadmap.md`](docs/roadmap.md) for design details and upcoming work.
 
 ## Local Toolchain
 
@@ -64,11 +66,38 @@ Rooms with no active WebSocket subscribers are removed after `30m` by default. O
 ROOM_IDLE_TIMEOUT=5m make run
 ```
 
+Open the game client after starting the server:
+
+```text
+http://localhost:8080
+```
+
+Use separate browser profiles or private windows when testing multiple players on one computer. Tabs in the same browser profile intentionally share the saved seat for a room.
+
 The explicit Go command used by `make test` is:
 
 ```bash
 CGO_ENABLED=0 GOCACHE=/tmp/go-build GOPATH=/tmp/go ./.conda-go/bin/go test ./...
 ```
+
+## Browser Client
+
+The root route serves a responsive Traditional Chinese game interface embedded in the Go binary. There is no Node.js install or asset build required to run it.
+
+The client supports:
+
+- room creation and invitation links
+- player readiness and owner controls
+- private role and investigation displays
+- role-aware night actions and passing
+- public discussion, voting, abstaining, and shooter actions
+- public game log and final role reveal
+- reconnect-token recovery after refresh
+- desktop and mobile layouts
+
+The browser stores a generated `player_id`, display name, and reconnect token per room in local storage. The reconnect token is never displayed or included in public room state. Chat is live-only and is not replayed after a refresh; authoritative game events remain available in the room log.
+
+See [`docs/web-client.md`](docs/web-client.md) for client behavior, storage, and current limitations.
 
 ## WebSocket API
 
@@ -188,10 +217,3 @@ Win rules:
 
 - Villagers win when all killers are dead.
 - Killers win when living killers are greater than or equal to living non-killers.
-
-## Git Workflow
-
-- Use Conventional Commits for commit messages.
-- Split unrelated work into separate commits.
-- Run `make test` before every push.
-- Do not push while unit tests are failing.

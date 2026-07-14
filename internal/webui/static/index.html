@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#090d1a">
+    <meta name="description" content="Midnight Council 即時多人陣營推理遊戲">
+    <title>Midnight Council｜午夜議會</title>
+    <link rel="stylesheet" href="/app.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Midnight Council 首頁">
+        <span class="brand-mark" aria-hidden="true"><span></span></span>
+        <span>
+          <strong>Midnight Council</strong>
+          <small>午夜議會</small>
+        </span>
+      </a>
+      <div id="connection-status" class="connection-status" data-state="offline" role="status">
+        <span class="status-dot" aria-hidden="true"></span>
+        <span id="connection-label">尚未連線</span>
+      </div>
+    </header>
+
+    <main>
+      <section id="join-view" class="join-view" aria-labelledby="join-title">
+        <div class="hero-copy">
+          <p class="eyebrow">REAL-TIME SOCIAL DEDUCTION</p>
+          <h1 id="join-title">當鐘聲敲響，<br><em>誰還值得相信？</em></h1>
+          <p class="hero-description">
+            進入午夜議會，在夜色中行動、在晨光裡辯論。找出潛伏者，或讓整座議會落入你的掌控。
+          </p>
+          <div class="rule-chips" aria-label="遊戲特色">
+            <span>2+ 位玩家</span>
+            <span>5 種身分</span>
+            <span>即時對局</span>
+          </div>
+        </div>
+
+        <div class="join-card panel">
+          <div class="panel-heading">
+            <span class="step-number">01</span>
+            <div>
+              <p class="eyebrow">ENTER THE COUNCIL</p>
+              <h2>加入議會</h2>
+            </div>
+          </div>
+          <form id="join-form" novalidate>
+            <label for="room-id">房間代號</label>
+            <div class="field-with-action">
+              <input id="room-id" name="room" type="text" maxlength="48" autocomplete="off" placeholder="例如：moon-2049" required>
+              <button id="random-room-button" class="icon-button" type="button" aria-label="產生隨機房間代號" title="產生隨機房間代號">✦</button>
+            </div>
+
+            <label for="player-name">議員名稱</label>
+            <input id="player-name" name="name" type="text" maxlength="32" autocomplete="nickname" placeholder="你的顯示名稱" required>
+
+            <p id="resume-note" class="resume-note" hidden></p>
+            <p id="join-error" class="form-error" role="alert" hidden></p>
+
+            <button id="join-button" class="primary-button" type="submit">
+              <span>進入議會</span>
+              <span aria-hidden="true">→</span>
+            </button>
+          </form>
+          <p class="privacy-note">重連憑證只會保存在這個瀏覽器中。</p>
+        </div>
+      </section>
+
+      <section id="game-view" class="game-view" aria-label="遊戲房間" hidden>
+        <div class="room-bar panel">
+          <div>
+            <p class="eyebrow">COUNCIL CHAMBER</p>
+            <div class="room-title-line">
+              <h1>房間 <span id="room-code">—</span></h1>
+              <button id="copy-room-button" class="text-button" type="button">複製邀請連結</button>
+            </div>
+          </div>
+          <div class="room-meta">
+            <div>
+              <small>階段</small>
+              <strong id="phase-label">等待中</strong>
+            </div>
+            <div>
+              <small>回合</small>
+              <strong id="round-label">—</strong>
+            </div>
+            <button id="leave-button" class="ghost-button" type="button">離開</button>
+          </div>
+        </div>
+
+        <div class="game-layout">
+          <aside class="left-column">
+            <section class="identity-card panel" aria-labelledby="identity-title">
+              <div class="section-title-row">
+                <div>
+                  <p class="eyebrow">YOUR IDENTITY</p>
+                  <h2 id="identity-title">你的身分</h2>
+                </div>
+                <span id="life-badge" class="badge">存活</span>
+              </div>
+              <div id="role-sigil" class="role-sigil" data-role="UNKNOWN" aria-hidden="true">?</div>
+              <strong id="role-name" class="role-name">尚未揭曉</strong>
+              <p id="role-description" class="muted">遊戲開始後，身分將只對你顯示。</p>
+              <div id="investigation-block" class="investigation-block" hidden>
+                <h3>查驗紀錄</h3>
+                <ol id="investigation-list"></ol>
+              </div>
+            </section>
+
+            <section class="players-card panel" aria-labelledby="players-title">
+              <div class="section-title-row compact">
+                <h2 id="players-title">議員席次</h2>
+                <span id="player-count" class="count-badge">0</span>
+              </div>
+              <ul id="player-list" class="player-list"></ul>
+            </section>
+          </aside>
+
+          <div class="center-column">
+            <section class="phase-card panel" aria-labelledby="phase-title">
+              <div id="phase-art" class="phase-art" data-phase="WAITING" aria-hidden="true">
+                <span class="phase-orbit orbit-one"></span>
+                <span class="phase-orbit orbit-two"></span>
+                <span class="phase-symbol">◐</span>
+              </div>
+              <div class="phase-content">
+                <p id="phase-kicker" class="eyebrow">ASSEMBLING</p>
+                <h2 id="phase-title">等待議員就座</h2>
+                <p id="phase-description" class="phase-description">所有非房主玩家準備完成後，房主即可開始遊戲。</p>
+
+                <div id="result-panel" class="result-panel" hidden>
+                  <span id="result-icon" aria-hidden="true">✦</span>
+                  <div>
+                    <small>本局結果</small>
+                    <strong id="result-title"></strong>
+                    <p id="result-reason"></p>
+                  </div>
+                </div>
+
+                <div id="waiting-actions" class="action-block">
+                  <button id="ready-button" class="secondary-button" type="button" hidden>切換準備</button>
+                  <button id="start-game-button" class="primary-button" type="button" hidden>
+                    <span>開始遊戲</span><span aria-hidden="true">→</span>
+                  </button>
+                  <p id="waiting-hint" class="action-hint"></p>
+                </div>
+
+                <form id="night-action-form" class="action-block" hidden>
+                  <label id="night-target-label" for="night-target">選擇夜間目標</label>
+                  <select id="night-target" required></select>
+                  <div class="button-row">
+                    <button id="night-action-button" class="primary-button" type="submit">確認行動</button>
+                    <button id="night-pass-button" class="ghost-button" type="button">本回合跳過</button>
+                  </div>
+                  <p id="night-action-hint" class="action-hint"></p>
+                </form>
+
+                <div id="discussion-actions" class="action-block" hidden>
+                  <button id="start-vote-button" class="primary-button" type="button" hidden>
+                    <span>開始表決</span><span aria-hidden="true">→</span>
+                  </button>
+                  <p id="discussion-hint" class="action-hint"></p>
+                </div>
+
+                <form id="vote-form" class="action-block" hidden>
+                  <label for="vote-target">投票對象</label>
+                  <select id="vote-target"></select>
+                  <button class="primary-button" type="submit">送出表決</button>
+                  <p id="vote-hint" class="action-hint"></p>
+                </form>
+
+                <form id="shoot-form" class="danger-action" hidden>
+                  <div>
+                    <strong>槍手能力</strong>
+                    <small>整局只能使用一次，目標會立即出局。</small>
+                  </div>
+                  <select id="shoot-target" aria-label="射擊目標" required></select>
+                  <button class="danger-button" type="submit">開槍</button>
+                </form>
+              </div>
+            </section>
+
+            <section class="chat-card panel" aria-labelledby="chat-title">
+              <div class="section-title-row compact">
+                <div>
+                  <p class="eyebrow">PUBLIC CHANNEL</p>
+                  <h2 id="chat-title">議會頻道</h2>
+                </div>
+                <span class="live-badge"><span aria-hidden="true"></span> LIVE</span>
+              </div>
+              <ol id="chat-list" class="chat-list" aria-live="polite">
+                <li id="chat-empty" class="empty-message">尚無發言。打破沉默，但別太早暴露自己。</li>
+              </ol>
+              <form id="chat-form" class="chat-form">
+                <label class="sr-only" for="chat-message">聊天訊息</label>
+                <input id="chat-message" maxlength="500" autocomplete="off" placeholder="輸入訊息…">
+                <button type="submit" aria-label="送出訊息">↑</button>
+              </form>
+              <p id="chat-hint" class="action-hint"></p>
+            </section>
+          </div>
+
+          <aside class="right-column">
+            <section class="log-card panel" aria-labelledby="log-title">
+              <div class="section-title-row compact">
+                <div>
+                  <p class="eyebrow">PUBLIC RECORD</p>
+                  <h2 id="log-title">議會紀錄</h2>
+                </div>
+              </div>
+              <ol id="event-log" class="event-log">
+                <li class="empty-message">遊戲事件將記錄於此。</li>
+              </ol>
+            </section>
+
+            <section class="rules-card panel">
+              <p class="eyebrow">WIN CONDITIONS</p>
+              <h2>勝利條件</h2>
+              <div class="rule-row">
+                <span class="rule-icon villagers">✦</span>
+                <p><strong>議會陣營</strong><small>找出並淘汰所有殺手</small></p>
+              </div>
+              <div class="rule-row">
+                <span class="rule-icon killers">◆</span>
+                <p><strong>殺手陣營</strong><small>控制半數以上存活席次</small></p>
+              </div>
+            </section>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>
