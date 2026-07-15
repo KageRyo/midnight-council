@@ -27,12 +27,13 @@ The Go server and its embedded web client already support a complete playable lo
 - Room idle timeout and hub cleanup
 - Public event log for game flow
 - Strict WebSocket client event schema validation
+- Per-connection token-bucket limits for chat and game events
 - Unit-tested room state rules
 - WebSocket integration tests for a full multiplayer game flow
 - Browser session recovery through local reconnect-token storage
 - Server-synchronized phase countdown on desktop and mobile
 
-Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, moderation, rate limiting, or horizontal scaling.
+Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, moderation, distributed rate limiting, or horizontal scaling.
 
 See [`docs/architecture.md`](docs/architecture.md), [`docs/web-client.md`](docs/web-client.md), [`docs/websocket-protocol.md`](docs/websocket-protocol.md), and [`docs/roadmap.md`](docs/roadmap.md) for design details and upcoming work.
 
@@ -80,6 +81,21 @@ All phase durations must be positive Go duration strings. For a fast local timin
 
 ```bash
 NIGHT_DURATION=10s DAY_DISCUSSION_DURATION=15s DAY_VOTING_DURATION=10s make run
+```
+
+Every WebSocket connection has separate token buckets for chat and game events. Valid events that exceed a bucket are rejected before they reach the room actor. Defaults and overrides are:
+
+| Environment variable | Default | Meaning |
+| --- | ---: | --- |
+| `WS_CHAT_EVENTS_PER_SECOND` | `1` | Sustained chat refill rate |
+| `WS_CHAT_BURST` | `5` | Maximum immediate chat burst |
+| `WS_GAME_EVENTS_PER_SECOND` | `5` | Sustained non-chat event refill rate |
+| `WS_GAME_BURST` | `10` | Maximum immediate non-chat burst |
+
+Rates may be fractional, and every rate and burst must be positive. Buckets start full and belong to one socket only; reconnecting creates fresh buckets. For stricter local testing:
+
+```bash
+WS_CHAT_EVENTS_PER_SECOND=0.5 WS_CHAT_BURST=2 WS_GAME_EVENTS_PER_SECOND=2 WS_GAME_BURST=4 make run
 ```
 
 Open the game client after starting the server:

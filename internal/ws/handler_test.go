@@ -21,6 +21,7 @@ type testClient struct {
 type wireEnvelope struct {
 	Type    string                  `json:"type"`
 	State   *room.Snapshot          `json:"state,omitempty"`
+	Chat    *room.ChatMessage       `json:"chat,omitempty"`
 	Error   string                  `json:"error,omitempty"`
 	Private *room.PrivatePlayerView `json:"private,omitempty"`
 }
@@ -202,6 +203,88 @@ func TestHandlerBroadcastsAutomaticPhaseProgression(t *testing.T) {
 	assertSnapshotDeadline(t, nextNight.State, durations.Night)
 }
 
+func TestHandlerRateLimitsChatPerConnectionAndRecovers(t *testing.T) {
+	limits := EventRateLimits{
+		Chat: RateLimit{EventsPerSecond: 20, Burst: 1},
+		Game: RateLimit{EventsPerSecond: 100, Burst: 10},
+	}
+	server := httptest.NewServer(NewHandler(room.NewHub(), WithEventRateLimits(limits)))
+	defer server.Close()
+
+	sender := connectClient(t, server.URL, "sender", "Sender")
+	observer := connectClient(t, server.URL, "observer", "Observer")
+	defer closeClients([]*testClient{sender, observer})
+
+	for _, client := range []*testClient{sender, observer} {
+		readStateUntil(t, client, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+			return len(state.Players) == 2
+		})
+	}
+
+	writeClientEvent(t, sender, map[string]any{"type": "chat", "message": "first"})
+	assertNextChat(t, sender, "sender", "first")
+	assertNextChat(t, observer, "sender", "first")
+
+	writeClientEvent(t, sender, map[string]any{"type": "chat", "message": "limited"})
+	readEnvelopeUntil(t, sender, func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && envelope.Error == chatRateLimitError
+	})
+
+	writeClientEvent(t, observer, map[string]any{"type": "chat", "message": "independent"})
+	assertNextChat(t, observer, "observer", "independent")
+	assertNextChat(t, sender, "observer", "independent")
+
+	time.Sleep(75 * time.Millisecond)
+	writeClientEvent(t, sender, map[string]any{"type": "chat", "message": "recovered"})
+	assertNextChat(t, observer, "sender", "recovered")
+}
+
+func TestHandlerRateLimitsGameEventsBeforeRoomDispatch(t *testing.T) {
+	limits := EventRateLimits{
+		Chat: RateLimit{EventsPerSecond: 100, Burst: 1},
+		Game: RateLimit{EventsPerSecond: 0.01, Burst: 1},
+	}
+	server := httptest.NewServer(NewHandler(room.NewHub(), WithEventRateLimits(limits)))
+	defer server.Close()
+
+	owner := connectClient(t, server.URL, "owner", "Owner")
+	guest := connectClient(t, server.URL, "guest", "Guest")
+	defer closeClients([]*testClient{owner, guest})
+
+	for _, client := range []*testClient{owner, guest} {
+		readStateUntil(t, client, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+			return len(state.Players) == 2
+		})
+	}
+
+	writeClientEvent(t, guest, map[string]any{"type": "ready", "ready": true})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return playerReady(t, state, "guest")
+	})
+
+	writeClientEvent(t, guest, map[string]any{"type": "ready", "ready": false})
+	readEnvelopeUntil(t, guest, func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && envelope.Error == gameRateLimitError
+	})
+
+	probe := connectClient(t, server.URL, "probe", "Probe")
+	defer probe.conn.Close()
+	probeState := readStateUntil(t, probe, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return len(state.Players) == 3
+	})
+	if !playerReady(t, probeState.State, "guest") {
+		t.Fatal("rate-limited ready event reached the room actor")
+	}
+
+	writeClientEvent(t, probe, map[string]any{"type": "ready", "ready": true})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return playerReady(t, state, "probe")
+	})
+
+	writeClientEvent(t, guest, map[string]any{"type": "chat", "message": "separate bucket"})
+	assertNextChat(t, owner, "guest", "separate bucket")
+}
+
 func assertSnapshotDeadline(t *testing.T, state *room.Snapshot, duration time.Duration) {
 	t.Helper()
 	if state.PhaseStartedAt.IsZero() {
@@ -300,6 +383,17 @@ func readEnvelope(t *testing.T, client *testClient, deadline time.Time) wireEnve
 	return envelope
 }
 
+func assertNextChat(t *testing.T, client *testClient, playerID, message string) {
+	t.Helper()
+	envelope := readEnvelope(t, client, time.Now().Add(5*time.Second))
+	if envelope.Type != "chat" || envelope.Chat == nil {
+		t.Fatalf("envelope = %#v, want chat", envelope)
+	}
+	if envelope.Chat.PlayerID != playerID || envelope.Chat.Message != message {
+		t.Fatalf("chat = %#v, want player %s message %q", envelope.Chat, playerID, message)
+	}
+}
+
 func requireRoleClient(t *testing.T, byRole map[room.Role]*testClient, role room.Role) *testClient {
 	t.Helper()
 
@@ -328,6 +422,18 @@ func playerAlive(t *testing.T, state *room.Snapshot, playerID string) bool {
 	for _, player := range state.Players {
 		if player.ID == playerID {
 			return player.Alive
+		}
+	}
+	t.Fatalf("player %s missing from state", playerID)
+	return false
+}
+
+func playerReady(t *testing.T, state *room.Snapshot, playerID string) bool {
+	t.Helper()
+
+	for _, player := range state.Players {
+		if player.ID == playerID {
+			return player.Ready
 		}
 	}
 	t.Fatalf("player %s missing from state", playerID)

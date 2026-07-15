@@ -79,6 +79,8 @@ Chat messages are broadcast live and the browser keeps only the latest 150 messa
 
 During an active game, dead players cannot chat. The client disables the field, and the server independently rejects attempts.
 
+The server also limits chat and game events with separate per-connection token buckets. When either limit is exceeded, the rejected event never reaches the room actor and the browser presents the returned error as a localized toast. The browser does not predict local token availability; the server remains authoritative, and a normally paced retry succeeds after tokens refill.
+
 ## Accessibility and Responsive Layout
 
 The HTML uses landmarks, headings, form labels, live status regions, and keyboard focus styles. All dynamic player content is inserted as text rather than HTML. The layout collapses from three columns to two and then one column at smaller widths; controls remain native buttons, inputs, and selects.

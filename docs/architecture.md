@@ -16,6 +16,9 @@ internal/ws.Handler               connection lifecycle and transport
 internal/protocol                 strict client-event decoding
              │
              ▼
+internal/ws connection limiter   chat/game token buckets
+             │
+             ▼
 internal/room.Hub                 room lookup and idle cleanup
              │
              ▼
@@ -52,6 +55,11 @@ The client has no build step or third-party runtime dependency. It renders serve
 - The server expects a pong within 60 seconds and sends a ping every 45 seconds.
 - Writes have a 10-second deadline.
 - A disconnect dispatches a room leave event with a two-second timeout.
+- Each connection has independent chat and game-event token buckets.
+
+Only text events that pass protocol decoding and shape validation reach the connection limiter. Chat consumes the chat bucket; every other accepted client event consumes the game bucket. An event with no token is answered with an error envelope and is never dispatched to the room actor. Invalid JSON and schema errors also never reach the actor.
+
+Buckets start at burst capacity. Chat defaults to one token per second with a burst of five; game events default to five tokens per second with a burst of ten. `WS_CHAT_EVENTS_PER_SECOND`, `WS_CHAT_BURST`, `WS_GAME_EVENTS_PER_SECOND`, and `WS_GAME_BURST` override these positive values at startup. Limits are process-local and connection-local, so a new WebSocket receives fresh buckets; cross-instance and account-wide controls remain future infrastructure concerns.
 
 The WebSocket upgrader currently accepts every HTTP origin. This is suitable for the prototype and local client, but an explicit deployment-origin allowlist is required before exposing authenticated sessions publicly.
 
@@ -135,7 +143,7 @@ PostgreSQL, Redis, and multi-instance routing belong behind these boundaries rat
 
 - `internal/protocol`: malformed JSON and event-shape validation;
 - `internal/room`: state-machine rules, timeout semantics, actor timer cancellation, private projections, reconnect, and idle cleanup;
-- `internal/ws`: real WebSocket multiplayer flow, automatic phase broadcasts, and transport errors;
+- `internal/ws`: real WebSocket multiplayer flow, per-connection rate-limit isolation and recovery, automatic phase broadcasts, and transport errors;
 - `internal/webui`: embedded asset routing, deadline-consumption checks, content types, method handling, and security headers.
 
 Run the full suite with `make test`.

@@ -25,18 +25,18 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 - Desktop and mobile browser-flow verification
 - Server-authoritative phase deadlines and automatic progression
 - Server-synchronized browser countdown
+- Per-connection rate limiting for chat and game events
 
 ## Next Tasks
 
-1. Add per-connection rate limiting for chat and game events.
-2. Add a chat moderation hook with a default allow implementation.
-3. Add Docker Compose for local deployment.
-4. Add GitHub Actions for `make test`.
-5. Add a load test script for WebSocket rooms.
-6. Add JWT authentication for persistent accounts.
-7. Add PostgreSQL persistence for accounts, game summaries, and audit logs.
-8. Add Redis Pub/Sub support for future multi-instance room routing.
+1. Add a chat moderation hook with a default allow implementation.
+2. Add Docker Compose for local deployment.
+3. Add GitHub Actions for `make test`.
+4. Add a load test script for WebSocket rooms.
+5. Add JWT authentication for persistent accounts.
+6. Add PostgreSQL persistence for accounts, game summaries, and audit logs.
+7. Add Redis Pub/Sub support for future multi-instance room routing.
 
 ## Current Priority
 
-The current priority is abuse resistance. Server-authoritative timing now prevents stalled games; per-connection rate limiting is next so chat and game events cannot overwhelm a room actor or other subscribers.
+The current priority remains abuse resistance. Per-connection rate limiting now protects room actors from event floods; a chat moderation hook is next so deployments have a clear policy boundary before broadcasting player text.

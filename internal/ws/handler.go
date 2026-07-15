@@ -22,19 +22,36 @@ const (
 )
 
 type Handler struct {
-	hub      *room.Hub
-	upgrader websocket.Upgrader
+	hub        *room.Hub
+	upgrader   websocket.Upgrader
+	rateLimits EventRateLimits
 }
 
-func NewHandler(hub *room.Hub) *Handler {
-	return &Handler{
-		hub: hub,
+type HandlerOption func(*Handler)
+
+func WithEventRateLimits(limits EventRateLimits) HandlerOption {
+	return func(h *Handler) {
+		h.rateLimits = limits
+	}
+}
+
+func NewHandler(hub *room.Hub, options ...HandlerOption) *Handler {
+	handler := &Handler{
+		hub:        hub,
+		rateLimits: DefaultEventRateLimits(),
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool {
 				return true
 			},
 		},
 	}
+	for _, option := range options {
+		option(handler)
+	}
+	if err := handler.rateLimits.Validate(); err != nil {
+		panic(err)
+	}
+	return handler
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -90,11 +107,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	done := make(chan struct{})
 	errors := make(chan room.Envelope, 8)
 	go writePump(conn, events, errors, done)
-	readPump(ctx, actor, playerID, playerName, conn, errors)
+	limiter := newConnectionRateLimiter(h.rateLimits, time.Now())
+	readPump(ctx, actor, playerID, playerName, conn, errors, limiter)
 	close(done)
 }
 
-func readPump(ctx context.Context, actor *room.Actor, playerID, playerName string, conn *websocket.Conn, errors chan<- room.Envelope) {
+func readPump(ctx context.Context, actor *room.Actor, playerID, playerName string, conn *websocket.Conn, errors chan<- room.Envelope, limiter *connectionRateLimiter) {
 	conn.SetReadLimit(1024)
 	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 	conn.SetPongHandler(func(string) error {
@@ -116,6 +134,13 @@ func readPump(ctx context.Context, actor *room.Actor, playerID, playerName strin
 		incoming, err := protocol.DecodeClientEvent(bytes.NewReader(payload))
 		if err != nil {
 			if !sendError(errors, err.Error()) {
+				return
+			}
+			continue
+		}
+
+		if !limiter.allow(incoming.Type, time.Now()) {
+			if !sendError(errors, rateLimitError(incoming.Type)) {
 				return
 			}
 			continue

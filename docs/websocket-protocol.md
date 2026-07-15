@@ -104,6 +104,19 @@ Chat envelopes are not retained in room snapshots.
 
 Malformed client events and invalid room actions produce an error envelope for that connection. A failed initial join is followed by connection closure; errors from later game events do not normally close the socket.
 
+### Per-Connection Rate Limits
+
+After JSON and schema validation, each connection applies two independent token buckets before dispatching an event to the room actor:
+
+- `chat` consumes the chat bucket, which defaults to 1 event per second with a burst of 5;
+- every other client event consumes the game bucket, which defaults to 5 events per second with a burst of 10.
+
+An exhausted bucket rejects the event only for its sending connection. The event does not mutate room state or produce a chat broadcast. Other connections retain their own capacity, and the chat and game buckets on one connection do not consume each other. Tokens refill continuously, so the same socket can send again later. Reconnecting creates new connection-local buckets.
+
+The initial join performed by the connection handshake is not a client event and does not consume either bucket. A schema-valid client event consumes capacity before room-state authorization, even when the room later rejects it for reasons such as phase or ownership.
+
+The error strings are `chat event rate limit exceeded; retry later` and `game event rate limit exceeded; retry later`. Servers can override the sustained rates and burst capacities with `WS_CHAT_EVENTS_PER_SECOND`, `WS_CHAT_BURST`, `WS_GAME_EVENTS_PER_SECOND`, and `WS_GAME_BURST`; all four values must be positive, and rates must be finite numbers.
+
 ## Phase/Event Matrix
 
 | Event | `WAITING` | `NIGHT` | `DAY_DISCUSSION` | `DAY_VOTING` | `FINISHED` |

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
@@ -25,12 +26,25 @@ func main() {
 	if err := phaseDurations.Validate(); err != nil {
 		log.Fatalf("invalid phase duration configuration: %v", err)
 	}
+	rateLimits := ws.EventRateLimits{
+		Chat: ws.RateLimit{
+			EventsPerSecond: getenvFloat64("WS_CHAT_EVENTS_PER_SECOND", ws.DefaultChatEventsPerSecond),
+			Burst:           getenvInt("WS_CHAT_BURST", ws.DefaultChatBurst),
+		},
+		Game: ws.RateLimit{
+			EventsPerSecond: getenvFloat64("WS_GAME_EVENTS_PER_SECOND", ws.DefaultGameEventsPerSecond),
+			Burst:           getenvInt("WS_GAME_BURST", ws.DefaultGameBurst),
+		},
+	}
+	if err := rateLimits.Validate(); err != nil {
+		log.Fatalf("invalid WebSocket rate limit configuration: %v", err)
+	}
 
 	hub := room.NewHub(
 		room.WithRoomIdleTimeout(roomIdleTimeout),
 		room.WithPhaseDurations(phaseDurations),
 	)
-	handler := ws.NewHandler(hub)
+	handler := ws.NewHandler(hub, ws.WithEventRateLimits(rateLimits))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -48,12 +62,16 @@ func main() {
 
 	go func() {
 		log.Printf(
-			"midnight-council game server listening on %s with room idle timeout %s and phase durations night=%s discussion=%s voting=%s",
+			"midnight-council game server listening on %s with room idle timeout %s, phase durations night=%s discussion=%s voting=%s, and WebSocket rate limits chat=%g/s burst=%d game=%g/s burst=%d",
 			addr,
 			roomIdleTimeout,
 			phaseDurations.Night,
 			phaseDurations.DayDiscussion,
 			phaseDurations.DayVoting,
+			rateLimits.Chat.EventsPerSecond,
+			rateLimits.Chat.Burst,
+			rateLimits.Game.EventsPerSecond,
+			rateLimits.Game.Burst,
 		)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server failed: %v", err)
@@ -90,4 +108,30 @@ func getenvDuration(key string, fallback time.Duration) time.Duration {
 		log.Fatalf("invalid %s duration %q: %v", key, value, err)
 	}
 	return duration
+}
+
+func getenvFloat64(key string, fallback float64) float64 {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil {
+		log.Fatalf("invalid %s value %q: %v", key, value, err)
+	}
+	return parsed
+}
+
+func getenvInt(key string, fallback int) int {
+	value := os.Getenv(key)
+	if value == "" {
+		return fallback
+	}
+
+	parsed, err := strconv.Atoi(value)
+	if err != nil {
+		log.Fatalf("invalid %s value %q: %v", key, value, err)
+	}
+	return parsed
 }

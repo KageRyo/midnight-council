@@ -833,6 +833,8 @@
       ["target is invalid", "所選目標已失效，請重新選擇。"],
       ["self target is not allowed", "這個能力不能以自己為目標。"],
       ["message is too long", "訊息超過 500 bytes，請縮短內容。"],
+      ["chat event rate limit exceeded", "聊天訊息送得太快，請稍後再試。"],
+      ["game event rate limit exceeded", "操作送得太快，請稍後再試。"],
     ];
     return translations.find(([fragment]) => message.includes(fragment))?.[1] || message;
   }
