@@ -28,12 +28,13 @@ The Go server and its embedded web client already support a complete playable lo
 - Public event log for game flow
 - Strict WebSocket client event schema validation
 - Per-connection token-bucket limits for chat and game events
+- Pluggable allow, reject, or replace chat moderation policy with a default allow implementation
 - Unit-tested room state rules
 - WebSocket integration tests for a full multiplayer game flow
 - Browser session recovery through local reconnect-token storage
 - Server-synchronized phase countdown on desktop and mobile
 
-Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, moderation, distributed rate limiting, or horizontal scaling.
+Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, built-in moderation rules, report and ban workflows, distributed rate limiting, or horizontal scaling.
 
 See [`docs/architecture.md`](docs/architecture.md), [`docs/web-client.md`](docs/web-client.md), [`docs/websocket-protocol.md`](docs/websocket-protocol.md), and [`docs/roadmap.md`](docs/roadmap.md) for design details and upcoming work.
 
@@ -97,6 +98,8 @@ Rates may be fractional, and every rate and burst must be positive. Buckets star
 ```bash
 WS_CHAT_EVENTS_PER_SECOND=0.5 WS_CHAT_BURST=2 WS_GAME_EVENTS_PER_SECOND=2 WS_GAME_BURST=4 make run
 ```
+
+Validated, rate-limited chat is then passed to a `moderation.ChatPolicy` before room dispatch. The policy can allow the original message, reject it with an optional public reason, or replace it. The server defaults to `moderation.AllowAllChat`; deployments can inject another implementation through `ws.WithChatPolicy`. Policy failures and invalid replacements fail closed and never broadcast the original message.
 
 Open the game client after starting the server:
 

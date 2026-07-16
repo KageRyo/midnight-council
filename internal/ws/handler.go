@@ -5,12 +5,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"midnight-council/internal/moderation"
 	"midnight-council/internal/protocol"
 	"midnight-council/internal/room"
 )
@@ -25,6 +27,7 @@ type Handler struct {
 	hub        *room.Hub
 	upgrader   websocket.Upgrader
 	rateLimits EventRateLimits
+	chatPolicy moderation.ChatPolicy
 }
 
 type HandlerOption func(*Handler)
@@ -35,10 +38,17 @@ func WithEventRateLimits(limits EventRateLimits) HandlerOption {
 	}
 }
 
+func WithChatPolicy(policy moderation.ChatPolicy) HandlerOption {
+	return func(h *Handler) {
+		h.chatPolicy = policy
+	}
+}
+
 func NewHandler(hub *room.Hub, options ...HandlerOption) *Handler {
 	handler := &Handler{
 		hub:        hub,
 		rateLimits: DefaultEventRateLimits(),
+		chatPolicy: moderation.AllowAllChat{},
 		upgrader: websocket.Upgrader{
 			CheckOrigin: func(_ *http.Request) bool {
 				return true
@@ -50,6 +60,9 @@ func NewHandler(hub *room.Hub, options ...HandlerOption) *Handler {
 	}
 	if err := handler.rateLimits.Validate(); err != nil {
 		panic(err)
+	}
+	if handler.chatPolicy == nil {
+		panic("chat moderation policy is required")
 	}
 	return handler
 }
@@ -108,11 +121,21 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	errors := make(chan room.Envelope, 8)
 	go writePump(conn, events, errors, done)
 	limiter := newConnectionRateLimiter(h.rateLimits, time.Now())
-	readPump(ctx, actor, playerID, playerName, conn, errors, limiter)
+	readPump(ctx, actor, roomID, playerID, playerName, conn, errors, limiter, h.chatPolicy)
 	close(done)
 }
 
-func readPump(ctx context.Context, actor *room.Actor, playerID, playerName string, conn *websocket.Conn, errors chan<- room.Envelope, limiter *connectionRateLimiter) {
+func readPump(
+	ctx context.Context,
+	actor *room.Actor,
+	roomID string,
+	playerID string,
+	playerName string,
+	conn *websocket.Conn,
+	errors chan<- room.Envelope,
+	limiter *connectionRateLimiter,
+	chatPolicy moderation.ChatPolicy,
+) {
 	conn.SetReadLimit(1024)
 	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 	conn.SetPongHandler(func(string) error {
@@ -147,6 +170,24 @@ func readPump(ctx context.Context, actor *room.Actor, playerID, playerName strin
 		}
 
 		event := incoming.RoomEvent(playerID, playerName)
+		if event.Type == room.EventChat {
+			message, publicError, moderationErr := moderateChat(ctx, chatPolicy, moderation.ChatRequest{
+				RoomID:     roomID,
+				PlayerID:   playerID,
+				PlayerName: playerName,
+				Message:    event.Message,
+			})
+			if moderationErr != nil {
+				log.Printf("chat moderation failed for room %q player %q: %v", roomID, playerID, moderationErr)
+			}
+			if publicError != "" {
+				if !sendError(errors, publicError) {
+					return
+				}
+				continue
+			}
+			event.Message = message
+		}
 		if _, err := actor.Dispatch(ctx, event); err != nil {
 			if !sendError(errors, err.Error()) {
 				return

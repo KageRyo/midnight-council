@@ -100,3 +100,19 @@ func TestGameClientRendersServerDeadlineCountdown(t *testing.T) {
 		}
 	}
 }
+
+func TestGameClientTranslatesChatModerationErrors(t *testing.T) {
+	app, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatalf("read app: %v", err)
+	}
+
+	for _, message := range []string{
+		"chat message rejected by moderation",
+		"chat moderation unavailable",
+	} {
+		if !strings.Contains(string(app), message) {
+			t.Fatalf("game client does not translate %q", message)
+		}
+	}
+}

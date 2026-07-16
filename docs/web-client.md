@@ -81,6 +81,8 @@ During an active game, dead players cannot chat. The client disables the field, 
 
 The server also limits chat and game events with separate per-connection token buckets. When either limit is exceeded, the rejected event never reaches the room actor and the browser presents the returned error as a localized toast. The browser does not predict local token availability; the server remains authoritative, and a normally paced retry succeeds after tokens refill.
 
+After rate limiting, the server's chat policy may allow, reject, or replace a message. Rejected messages produce an error toast only for the sender. Replaced messages arrive through the normal chat envelope, so every client—including the sender—renders only the server-approved text. Policy availability failures are also shown as localized errors.
+
 ## Accessibility and Responsive Layout
 
 The HTML uses landmarks, headings, form labels, live status regions, and keyboard focus styles. All dynamic player content is inserted as text rather than HTML. The layout collapses from three columns to two and then one column at smaller widths; controls remain native buttons, inputs, and selects.
@@ -127,5 +129,6 @@ node --check internal/webui/static/app.js
 - no retained chat history;
 - no audible cues or notifications;
 - no room restart after `FINISHED`;
+- no built-in word list, external moderation provider, reporting, mute, or ban workflow;
 - no frontend unit-test framework or committed browser-test suite;
 - browser-generated player IDs are identities only within an in-memory room, not accounts.

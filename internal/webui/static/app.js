@@ -835,6 +835,8 @@
       ["message is too long", "訊息超過 500 bytes，請縮短內容。"],
       ["chat event rate limit exceeded", "聊天訊息送得太快，請稍後再試。"],
       ["game event rate limit exceeded", "操作送得太快，請稍後再試。"],
+      ["chat message rejected by moderation", "訊息未通過聊天室審核。"],
+      ["chat moderation unavailable", "聊天室審核暫時無法使用，請稍後再試。"],
     ];
     return translations.find(([fragment]) => message.includes(fragment))?.[1] || message;
   }

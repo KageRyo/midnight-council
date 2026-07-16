@@ -1,15 +1,18 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 
+	"midnight-council/internal/moderation"
 	"midnight-council/internal/room"
 )
 
@@ -208,7 +211,16 @@ func TestHandlerRateLimitsChatPerConnectionAndRecovers(t *testing.T) {
 		Chat: RateLimit{EventsPerSecond: 20, Burst: 1},
 		Game: RateLimit{EventsPerSecond: 100, Burst: 10},
 	}
-	server := httptest.NewServer(NewHandler(room.NewHub(), WithEventRateLimits(limits)))
+	var reviewCount atomic.Int32
+	policy := moderation.ChatPolicyFunc(func(_ context.Context, _ moderation.ChatRequest) (moderation.ChatDecision, error) {
+		reviewCount.Add(1)
+		return moderation.ChatDecision{Action: moderation.ChatAllow}, nil
+	})
+	server := httptest.NewServer(NewHandler(
+		room.NewHub(),
+		WithEventRateLimits(limits),
+		WithChatPolicy(policy),
+	))
 	defer server.Close()
 
 	sender := connectClient(t, server.URL, "sender", "Sender")
@@ -229,6 +241,9 @@ func TestHandlerRateLimitsChatPerConnectionAndRecovers(t *testing.T) {
 	readEnvelopeUntil(t, sender, func(envelope wireEnvelope) bool {
 		return envelope.Type == "error" && envelope.Error == chatRateLimitError
 	})
+	if got := reviewCount.Load(); got != 1 {
+		t.Fatalf("moderation review count = %d, want 1; rate limit should run first", got)
+	}
 
 	writeClientEvent(t, observer, map[string]any{"type": "chat", "message": "independent"})
 	assertNextChat(t, observer, "observer", "independent")
@@ -237,6 +252,64 @@ func TestHandlerRateLimitsChatPerConnectionAndRecovers(t *testing.T) {
 	time.Sleep(75 * time.Millisecond)
 	writeClientEvent(t, sender, map[string]any{"type": "chat", "message": "recovered"})
 	assertNextChat(t, observer, "sender", "recovered")
+}
+
+func TestHandlerAppliesChatModerationBeforeRoomDispatch(t *testing.T) {
+	requests := make(chan moderation.ChatRequest, 4)
+	policy := moderation.ChatPolicyFunc(func(_ context.Context, request moderation.ChatRequest) (moderation.ChatDecision, error) {
+		requests <- request
+		switch request.Message {
+		case "replace":
+			return moderation.ChatDecision{
+				Action:      moderation.ChatReplace,
+				Replacement: "filtered",
+			}, nil
+		case "reject":
+			return moderation.ChatDecision{
+				Action: moderation.ChatReject,
+				Reason: "blocked by test policy",
+			}, nil
+		default:
+			return moderation.ChatDecision{Action: moderation.ChatAllow}, nil
+		}
+	})
+	limits := EventRateLimits{
+		Chat: RateLimit{EventsPerSecond: 100, Burst: 10},
+		Game: RateLimit{EventsPerSecond: 100, Burst: 10},
+	}
+	server := httptest.NewServer(NewHandler(
+		room.NewHub(),
+		WithEventRateLimits(limits),
+		WithChatPolicy(policy),
+	))
+	defer server.Close()
+
+	sender := connectClient(t, server.URL, "sender", "Sender")
+	observer := connectClient(t, server.URL, "observer", "Observer")
+	defer closeClients([]*testClient{sender, observer})
+
+	for _, client := range []*testClient{sender, observer} {
+		readStateUntil(t, client, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+			return len(state.Players) == 2
+		})
+	}
+
+	writeClientEvent(t, sender, map[string]any{"type": "chat", "message": "replace"})
+	assertNextChat(t, sender, "sender", "filtered")
+	assertNextChat(t, observer, "sender", "filtered")
+	request := <-requests
+	if request.RoomID != "integration" || request.PlayerID != "sender" || request.PlayerName != "Sender" || request.Message != "replace" {
+		t.Fatalf("moderation request = %#v, want sender metadata and original message", request)
+	}
+
+	writeClientEvent(t, sender, map[string]any{"type": "chat", "message": "reject"})
+	readEnvelopeUntil(t, sender, func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && envelope.Error == "blocked by test policy"
+	})
+
+	writeClientEvent(t, sender, map[string]any{"type": "chat", "message": "after rejection"})
+	assertNextChat(t, observer, "sender", "after rejection")
+	assertNextChat(t, sender, "sender", "after rejection")
 }
 
 func TestHandlerRateLimitsGameEventsBeforeRoomDispatch(t *testing.T) {

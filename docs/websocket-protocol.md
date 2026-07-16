@@ -117,6 +117,18 @@ The initial join performed by the connection handshake is not a client event and
 
 The error strings are `chat event rate limit exceeded; retry later` and `game event rate limit exceeded; retry later`. Servers can override the sustained rates and burst capacities with `WS_CHAT_EVENTS_PER_SECOND`, `WS_CHAT_BURST`, `WS_GAME_EVENTS_PER_SECOND`, and `WS_GAME_BURST`; all four values must be positive, and rates must be finite numbers.
 
+### Chat Moderation
+
+A chat event that passes its connection rate limit is reviewed before room dispatch. The configured server policy can:
+
+- allow the validated original message;
+- reject it, optionally returning a public reason to the sender;
+- replace it with server-provided text.
+
+Replacement text is trimmed and must remain non-empty and at most 500 bytes. A rejected message is not broadcast and never reaches the room actor. Policy errors, unknown decisions, and invalid replacements fail closed with `chat moderation unavailable; retry later`; the original message is never used as a fallback. A rejection without a custom reason returns `chat message rejected by moderation`.
+
+The default policy allows every message unchanged. Moderation does not replace normal room authorization: an allowed message can still be rejected by room state, for example when a dead player attempts to chat during an active game.
+
 ## Phase/Event Matrix
 
 | Event | `WAITING` | `NIGHT` | `DAY_DISCUSSION` | `DAY_VOTING` | `FINISHED` |
