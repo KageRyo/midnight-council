@@ -116,3 +116,36 @@ func TestGameClientTranslatesChatModerationErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestGameClientSupportsRoomLifecycleControls(t *testing.T) {
+	index, err := assets.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatalf("read index: %v", err)
+	}
+	app, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatalf("read app: %v", err)
+	}
+
+	for _, id := range []string{
+		`id="join-as-spectator"`,
+		`id="spectator-list"`,
+		`id="room-admin-card"`,
+		`id="return-waiting-button"`,
+	} {
+		if !strings.Contains(string(index), id) {
+			t.Fatalf("game client is missing %s", id)
+		}
+	}
+	for _, eventType := range []string{
+		"transfer_owner",
+		"kick_participant",
+		"set_room_locked",
+		"set_player_limit",
+		"return_to_waiting",
+	} {
+		if !strings.Contains(string(app), eventType) {
+			t.Fatalf("game client does not send %s", eventType)
+		}
+	}
+}

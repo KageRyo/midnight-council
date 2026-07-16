@@ -14,7 +14,13 @@ To reclaim an existing seat:
 ws://localhost:8080/ws/rooms/{room_id}?player_id={player_id}&name={display_name}&reconnect_token={token}
 ```
 
-`room_id`, `player_id`, and `name` must be non-empty. A new player can join only while the room is in `WAITING`. An existing player ID always requires its reconnect token, including when the original connection is still active.
+To join or reclaim a spectator identity, add:
+
+```text
+spectator=true
+```
+
+`room_id`, `player_id`, and `name` must be non-empty. A new player can join only while the room is in `WAITING`; a new spectator can join in any phase. A locked room rejects either kind of new participant. Reconnects are still allowed through a lock and always require the exact reconnect token plus the same player-versus-spectator type, including while another connection for that identity remains active.
 
 The prototype sends the reconnect token as a query parameter. Deployments must avoid logging raw query strings and should use TLS so WebSocket connections use `wss://`.
 
@@ -32,6 +38,11 @@ Every client event is one text frame containing exactly one JSON object. Unknown
 | `start_vote` | — | — | Owner moves discussion to voting |
 | `vote` | — | `target_id` string | Vote for a living target; omit or use empty value to abstain |
 | `shoot` | `target_id` string | — | Shooter's one-use daytime action |
+| `transfer_owner` | `target_id` string | — | Owner transfers ownership to a connected seated player |
+| `kick_participant` | `target_id` string | — | Owner removes a player or spectator while waiting or after a game |
+| `set_room_locked` | `locked` boolean | — | Owner allows or blocks new participants |
+| `set_player_limit` | `max_players` integer | — | Owner sets the player cap from 2 through 20 while waiting or after a game |
+| `return_to_waiting` | — | — | Owner resets an active or finished room for a rematch |
 
 Examples and the current event schema are in `README.md` and `docs/websocket-client-event.schema.json`.
 
@@ -52,6 +63,9 @@ The server sends one of three envelope types.
     "phase_deadline": "2026-07-14T09:01:30Z",
     "round": 1,
     "players": [],
+    "spectators": [],
+    "locked": false,
+    "max_players": 12,
     "log": [],
     "updated_at": "2026-07-14T09:00:00Z",
     "server_time": "2026-07-14T09:00:10Z"
@@ -59,6 +73,7 @@ The server sends one of three envelope types.
   "private": {
     "player_id": "p1",
     "reconnect_token": "private-token",
+    "spectator": false,
     "role": "DETECTIVE",
     "alive": true,
     "action_required": true,
@@ -71,6 +86,8 @@ The server sends one of three envelope types.
 ```
 
 The `state` object is identical for all subscribers and is safe to broadcast. Roles are omitted from public player views until `FINISHED`. The `private` object is generated for the receiving player and must never be shown to another player.
+
+Spectators appear only in `state.spectators`, do not consume `max_players`, and receive a private view with `spectator: true`, their reconnect token, and no role or game actions.
 
 `available` describes events the UI may offer, but it is not authorization: the server validates the current state again when an event arrives.
 
@@ -102,7 +119,7 @@ Chat envelopes are not retained in room snapshots.
 }
 ```
 
-Malformed client events and invalid room actions produce an error envelope for that connection. A failed initial join is followed by connection closure; errors from later game events do not normally close the socket.
+Malformed client events and invalid room actions produce an error envelope for that connection. A failed initial join is followed by WebSocket close code `1008`; short public errors are also used as the close reason. Being kicked sends `removed from room by the owner` and closes all sockets subscribed as that participant. Errors from other later game events do not normally close the socket.
 
 ### Per-Connection Rate Limits
 
@@ -129,17 +146,32 @@ Replacement text is trimmed and must remain non-empty and at most 500 bytes. A r
 
 The default policy allows every message unchanged. Moderation does not replace normal room authorization: an allowed message can still be rejected by room state, for example when a dead player attempts to chat during an active game.
 
+## Room Lifecycle
+
+- The first seated player becomes owner. Ownership can be transferred explicitly to another connected player.
+- If an owner disconnects during an active or finished game, another connected seated player becomes owner when available.
+- Rooms begin unlocked with a 12-player cap. Owners can choose a cap from 2 through 20, but never below current player occupancy.
+- Locking blocks new players and spectators without invalidating existing reconnect tokens.
+- Spectators may join any phase when unlocked. They cannot ready, vote, receive a role, perform actions, or chat during active play.
+- Kicking is restricted to `WAITING` and `FINISHED`; the owner cannot kick their own seat.
+- `return_to_waiting` is owner-only and valid from active or finished phases. It removes disconnected identities and clears all game-only state while preserving connected participants, reconnect tokens, room lock, and player cap.
+
 ## Phase/Event Matrix
 
 | Event | `WAITING` | `NIGHT` | `DAY_DISCUSSION` | `DAY_VOTING` | `FINISHED` |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | `ready` | yes | no | no | no | no |
 | `start_game` | owner | no | no | no | no |
-| `chat` | yes | living | living | living | yes |
+| `chat` | all participants | living players | living players | living players | all participants |
 | `night_action` / `night_pass` | no | eligible living role | no | no | no |
 | `start_vote` | no | no | owner | no | no |
 | `vote` | no | no | no | living | no |
 | `shoot` | no | no | living shooter | living shooter | no |
+| `transfer_owner` | owner | owner | owner | owner | owner |
+| `kick_participant` | owner | no | no | no | owner |
+| `set_room_locked` | owner | owner | owner | owner | owner |
+| `set_player_limit` | owner | no | no | no | owner |
+| `return_to_waiting` | no | owner | owner | owner | owner |
 
 The state layer remains authoritative for every condition shown in this table.
 

@@ -59,8 +59,11 @@ The client has no build step or third-party runtime dependency. It renders serve
 - Writes have a 10-second deadline.
 - A disconnect dispatches a room leave event with a two-second timeout.
 - Each connection has independent chat and game-event token buckets.
+- The `spectator=true` query parameter creates or reclaims a spectator identity instead of a player seat.
 
 Only text events that pass protocol decoding and shape validation reach the connection limiter. Chat consumes the chat bucket; every other accepted client event consumes the game bucket. An event with no token is answered with an error envelope and is never dispatched to the room actor. Invalid JSON and schema errors also never reach the actor.
+
+An initial join rejection writes an error envelope and then closes the WebSocket with policy-violation code `1008`; short public errors are repeated as the close reason so browsers can still explain the rejection if they observe the close before rendering the envelope.
 
 Buckets start at burst capacity. Chat defaults to one token per second with a burst of five; game events default to five tokens per second with a burst of ten. `WS_CHAT_EVENTS_PER_SECOND`, `WS_CHAT_BURST`, `WS_GAME_EVENTS_PER_SECOND`, and `WS_GAME_BURST` override these positive values at startup. Limits are process-local and connection-local, so a new WebSocket receives fresh buckets; cross-instance and account-wide controls remain future infrastructure concerns.
 
@@ -81,6 +84,8 @@ The mirrored machine-readable client schema is `docs/websocket-client-event.sche
 `room.Hub` owns the map of room IDs to actors. The first connection creates a room implicitly. Each actor has one inbox and applies commands sequentially, so state transitions within a room do not need shared-state locks.
 
 The actor broadcasts successful state changes to all subscribers. Each subscriber has a 16-message buffer; a subscriber that cannot keep up is removed rather than blocking the room. State envelopes are personalized immediately before delivery.
+
+Kicking a participant is an actor-level terminal operation: the room discards pending events for that identity, guarantees one private removal error, removes and closes every matching subscription, then broadcasts the new public state to the remaining participants.
 
 The actor owns one phase timer in addition to its idle timer. `State` supplies an absolute deadline, while the actor only schedules its wake-up and sends the internal timeout event back through the same serialized state-machine path. A phase change stops and resets the old timer before the actor waits again. Closing the actor stops both timers.
 
@@ -105,6 +110,8 @@ DAY_VOTING ───────────┘
    │ all votes or deadline
    │
    └──────────────► FINISHED when a win condition is met
+                           │
+                           └── owner return-to-waiting ──► WAITING
 ```
 
 `State.Apply` is the only game-state mutation entrypoint. It validates phase, ownership, life state, role, targets, and early timeout attempts before applying an event. Night and voting phases resolve when every required living player submits or when their deadlines expire. Discussion moves to voting when its deadline expires.
@@ -115,6 +122,14 @@ Default durations are 90 seconds for night, five minutes for discussion, and 60 
 
 Roles are shuffled using `crypto/rand`. Reconnect tokens and subscription IDs also use cryptographically secure randomness.
 
+## Room Lifecycle and Participants
+
+The state distinguishes seated players from spectators. Players count toward the room's player cap and can receive roles; spectators have their own public list and private reconnect token but never receive a role or game action. A new player may join only in `WAITING`, while a new spectator may join during any phase. A locked room rejects both kinds of new participant but still permits a valid reconnect.
+
+Rooms default to 12 player seats and owners may choose a limit from 2 through 20 while waiting or after a game. Spectators do not consume player capacity. Owners may lock or unlock the room in any phase, explicitly transfer ownership to a connected seated player, and kick a player or spectator while waiting or after a game. When the owner disconnects during an active or finished game, ownership moves to another connected seated player when one exists.
+
+The owner may send `return_to_waiting` from an active or finished phase. This clears the round, deadlines, roles, readiness, actions, votes, investigations, result, and public game log. Connected players and spectators keep their identities and reconnect tokens; disconnected participants are removed. Room-level options such as lock state and player cap remain unchanged for the rematch.
+
 ## Public and Private Projections
 
 Every state broadcast consists of:
@@ -122,17 +137,17 @@ Every state broadcast consists of:
 - `state`: safe public room information for every subscriber;
 - `private`: information generated only for the subscribing player.
 
-Before the game ends, public player views omit roles. A player's private view may include their role, reconnect token, currently available events, vote state, shooter availability, and detective investigations. At `FINISHED`, roles are copied into the public player list.
+Before the game ends, public player views omit roles. A player's private view may include their role, reconnect token, currently available events, vote state, shooter availability, and detective investigations. A spectator private view contains only its identity, reconnect token, and spectator marker. At `FINISHED`, roles are copied into the public player list.
 
-Public snapshots include `phase_started_at`, an optional `phase_deadline`, and `server_time`. The browser uses `server_time` only to compensate for client clock skew when rendering the deadline. It never advances a phase locally.
+Public snapshots include player and spectator lists, owner ID, lock state, player cap, `phase_started_at`, an optional `phase_deadline`, and `server_time`. The browser uses `server_time` only to compensate for client clock skew when rendering the deadline. It never advances a phase locally.
 
 This projection boundary is a core invariant: hidden state must remain in `internal/room` and must never be derived or trusted from the client.
 
 ## Reconnect Lifecycle
 
-Joining a new seat creates a 32-byte reconnect token. During `WAITING`, leaving removes the seat. After the game begins, leaving only marks the seat disconnected so its role and game state remain intact.
+Joining a new player or spectator identity creates a 32-byte reconnect token. During `WAITING`, leaving removes that identity. After the game begins, leaving only marks it disconnected so active game state remains intact until a return-to-waiting reset.
 
-Reclaiming an existing player ID requires the exact token. The browser stores the generated player ID and token per room and resubmits them when the player chooses to reconnect. The token is present only in `PrivatePlayerView` and in the WebSocket connection query; it is never broadcast publicly.
+Reclaiming an existing participant ID requires the exact token and the same player-versus-spectator type. The browser stores the generated ID, type, and token per room and resubmits them when the participant chooses to reconnect. The token is present only in `PrivatePlayerView` and in the WebSocket connection query; it is never broadcast publicly.
 
 ## Persistence and Scaling Boundaries
 
@@ -149,9 +164,9 @@ PostgreSQL, Redis, and multi-instance routing belong behind these boundaries rat
 ## Test Boundaries
 
 - `internal/protocol`: malformed JSON and event-shape validation;
-- `internal/room`: state-machine rules, timeout semantics, actor timer cancellation, private projections, reconnect, and idle cleanup;
+- `internal/room`: state-machine rules, room lifecycle, spectator isolation, timeout semantics, actor timer cancellation, private projections, reconnect, and idle cleanup;
 - `internal/moderation`: default allow policy and chat policy contract;
-- `internal/ws`: real WebSocket multiplayer flow, rate-limit ordering, moderation decisions, automatic phase broadcasts, and transport errors;
+- `internal/ws`: real WebSocket multiplayer flow, room administration, spectator connections, terminal disconnects, rate-limit ordering, moderation decisions, automatic phase broadcasts, and transport errors;
 - `internal/webui`: embedded asset routing, deadline-consumption checks, content types, method handling, and security headers.
 
 Run the full suite with `make test`.

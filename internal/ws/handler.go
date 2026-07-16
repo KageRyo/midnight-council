@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -77,6 +78,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	playerID := strings.TrimSpace(r.URL.Query().Get("player_id"))
 	playerName := strings.TrimSpace(r.URL.Query().Get("name"))
 	reconnectToken := strings.TrimSpace(r.URL.Query().Get("reconnect_token"))
+	spectator := false
+	if rawSpectator := strings.TrimSpace(r.URL.Query().Get("spectator")); rawSpectator != "" {
+		spectator, err = strconv.ParseBool(rawSpectator)
+		if err != nil {
+			http.Error(w, "spectator query param must be a boolean", http.StatusBadRequest)
+			return
+		}
+	}
 	if playerID == "" || playerName == "" {
 		http.Error(w, "player_id and name query params are required", http.StatusBadRequest)
 		return
@@ -96,9 +105,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		PlayerID:       playerID,
 		PlayerName:     playerName,
 		ReconnectToken: reconnectToken,
+		Spectator:      spectator,
 	})
 	if err != nil {
-		_ = writeEnvelope(conn, room.Envelope{Type: "error", Error: err.Error()})
+		writeTerminalError(conn, err.Error())
 		return
 	}
 	defer func() {
@@ -112,7 +122,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	events, unsubscribe, err := actor.Subscribe(ctx, playerID)
 	if err != nil {
-		_ = writeEnvelope(conn, room.Envelope{Type: "error", Error: err.Error()})
+		writeTerminalError(conn, err.Error())
 		return
 	}
 	defer unsubscribe()
@@ -213,6 +223,7 @@ func writePump(conn *websocket.Conn, events <-chan room.Envelope, errors <-chan 
 		select {
 		case envelope, ok := <-events:
 			if !ok {
+				_ = conn.Close()
 				return
 			}
 			if err := writeEnvelope(conn, envelope); err != nil {
@@ -241,6 +252,19 @@ func writeEnvelope(conn *websocket.Conn, envelope room.Envelope) error {
 	}
 	defer writer.Close()
 	return json.NewEncoder(writer).Encode(envelope)
+}
+
+func writeTerminalError(conn *websocket.Conn, message string) {
+	_ = writeEnvelope(conn, room.Envelope{Type: "error", Error: message})
+	closeReason := message
+	if len([]byte(closeReason)) > 120 {
+		closeReason = "connection rejected"
+	}
+	_ = conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.ClosePolicyViolation, closeReason),
+		time.Now().Add(writeWait),
+	)
 }
 
 func roomIDFromPath(path string) (string, error) {

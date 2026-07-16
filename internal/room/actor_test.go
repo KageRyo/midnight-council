@@ -90,6 +90,54 @@ func TestActorCancelsPreviousPhaseTimerAfterManualTransition(t *testing.T) {
 	eventually(t, 500*time.Millisecond, actor.Closed)
 }
 
+func TestActorDisconnectsKickedParticipantSubscription(t *testing.T) {
+	actor := newActor("kick-room", 50*time.Millisecond, DefaultPhaseDurations(), nil)
+	ctx := context.Background()
+	for _, playerID := range []string{"owner", "guest"} {
+		if _, err := actor.Dispatch(ctx, Event{Type: EventJoin, PlayerID: playerID, PlayerName: playerID}); err != nil {
+			t.Fatalf("join %s: %v", playerID, err)
+		}
+	}
+
+	guestEvents, unsubscribeGuest, err := actor.Subscribe(ctx, "guest")
+	if err != nil {
+		t.Fatalf("subscribe guest: %v", err)
+	}
+	defer unsubscribeGuest()
+	<-guestEvents
+
+	for i := 0; i < 15; i++ {
+		if _, err := actor.Dispatch(ctx, Event{
+			Type:     EventSetRoomLocked,
+			PlayerID: "owner",
+			Locked:   i%2 == 0,
+		}); err != nil {
+			t.Fatalf("fill guest event buffer: %v", err)
+		}
+	}
+
+	if _, err := actor.Dispatch(ctx, Event{
+		Type:     EventKickParticipant,
+		PlayerID: "owner",
+		TargetID: "guest",
+	}); err != nil {
+		t.Fatalf("kick guest: %v", err)
+	}
+
+	envelope, ok := <-guestEvents
+	if !ok {
+		t.Fatal("kicked participant channel closed before terminal error")
+	}
+	if envelope.Type != "error" || envelope.Error != ErrKicked.Error() {
+		t.Fatalf("kicked participant envelope = %#v", envelope)
+	}
+	if _, ok := <-guestEvents; ok {
+		t.Fatal("kicked participant subscription remained open")
+	}
+
+	eventually(t, 500*time.Millisecond, actor.Closed)
+}
+
 func joinReadyPlayers(t *testing.T, ctx context.Context, actor *Actor, playerIDs []string) {
 	t.Helper()
 	for _, playerID := range playerIDs {

@@ -13,6 +13,8 @@ import (
 
 const (
 	MinPlayersToStart  = 2
+	DefaultMaxPlayers  = 12
+	MaxPlayersAllowed  = 20
 	MaxChatBytes       = 500
 	MaxEventLogEntries = 100
 )
@@ -26,6 +28,8 @@ var (
 	ErrOwnerOnly               = errors.New("only the room owner can perform this action")
 	ErrRoomNotWaiting          = errors.New("room is not waiting")
 	ErrRoomNotJoinable         = errors.New("room is not joinable")
+	ErrRoomLocked              = errors.New("room is locked")
+	ErrRoomFull                = errors.New("room player limit has been reached")
 	ErrWrongPhase              = errors.New("action is not allowed in the current phase")
 	ErrGameFinished            = errors.New("game is already finished")
 	ErrNotEnoughPlayers        = errors.New("not enough players to start")
@@ -39,6 +43,16 @@ var (
 	ErrShooterOnly             = errors.New("only the shooter can perform this action")
 	ErrShooterAlreadyUsed      = errors.New("shooter action has already been used")
 	ErrPhaseDeadlineNotReached = errors.New("phase deadline has not been reached")
+	ErrParticipantTypeMismatch = errors.New("participant type does not match the existing seat")
+	ErrSpectatorCannotChat     = errors.New("spectators cannot chat during an active game")
+	ErrParticipantNotFound     = errors.New("participant not found")
+	ErrCannotKickOwner         = errors.New("the room owner cannot be kicked")
+	ErrKickNotAllowed          = errors.New("participants can only be kicked while waiting or after a game")
+	ErrKicked                  = errors.New("removed from room by the owner")
+	ErrInvalidOwnerTarget      = errors.New("new owner must be a connected seated player")
+	ErrPlayerLimitOutOfRange   = errors.New("player limit is out of range")
+	ErrPlayerLimitBelowCurrent = errors.New("player limit cannot be below the current player count")
+	ErrAlreadyWaiting          = errors.New("room is already waiting")
 )
 
 type State struct {
@@ -49,6 +63,9 @@ type State struct {
 	phaseDurations PhaseDurations
 	ownerID        string
 	players        map[string]*Player
+	spectators     map[string]*Spectator
+	locked         bool
+	maxPlayers     int
 	round          int
 	nightActions   map[string]NightAction
 	votes          map[string]string
@@ -73,6 +90,8 @@ func newState(roomID string, phaseDurations PhaseDurations) *State {
 		phaseStartedAt: now,
 		phaseDurations: phaseDurations,
 		players:        make(map[string]*Player),
+		spectators:     make(map[string]*Spectator),
+		maxPlayers:     DefaultMaxPlayers,
 		nightActions:   make(map[string]NightAction),
 		votes:          make(map[string]string),
 		investigations: make(map[string][]InvestigationResult),
@@ -106,6 +125,16 @@ func (s *State) Apply(event Event) (*Envelope, error) {
 		return s.applyVote(event)
 	case EventShoot:
 		return s.applyShoot(event)
+	case EventTransferOwner:
+		return s.applyTransferOwner(event)
+	case EventKickParticipant:
+		return s.applyKickParticipant(event)
+	case EventSetRoomLocked:
+		return s.applySetRoomLocked(event)
+	case EventSetPlayerLimit:
+		return s.applySetPlayerLimit(event)
+	case EventReturnToWaiting:
+		return s.applyReturnToWaiting(event)
 	case EventPhaseTimeout:
 		return s.applyPhaseTimeout(event)
 	default:
@@ -144,6 +173,21 @@ func (s *State) Snapshot() Snapshot {
 		return players[i].Name < players[j].Name
 	})
 
+	spectators := make([]SpectatorView, 0, len(s.spectators))
+	for _, spectator := range s.spectators {
+		spectators = append(spectators, SpectatorView{
+			ID:        spectator.ID,
+			Name:      spectator.Name,
+			Connected: spectator.Connected,
+		})
+	}
+	sort.Slice(spectators, func(i, j int) bool {
+		if spectators[i].Name == spectators[j].Name {
+			return spectators[i].ID < spectators[j].ID
+		}
+		return spectators[i].Name < spectators[j].Name
+	})
+
 	entries := make([]LogEntry, len(s.log))
 	copy(entries, s.log)
 	var phaseDeadline *time.Time
@@ -160,6 +204,9 @@ func (s *State) Snapshot() Snapshot {
 		PhaseDeadline:  phaseDeadline,
 		Round:          s.round,
 		Players:        players,
+		Spectators:     spectators,
+		Locked:         s.locked,
+		MaxPlayers:     s.maxPlayers,
 		Result:         s.result,
 		Log:            entries,
 		UpdatedAt:      s.updatedAt,
@@ -170,7 +217,15 @@ func (s *State) Snapshot() Snapshot {
 func (s *State) PrivateView(playerID string) *PrivatePlayerView {
 	player, ok := s.players[playerID]
 	if !ok {
-		return nil
+		spectator, spectatorOK := s.spectators[playerID]
+		if !spectatorOK {
+			return nil
+		}
+		return &PrivatePlayerView{
+			PlayerID:       spectator.ID,
+			ReconnectToken: spectator.ReconnectToken,
+			Spectator:      true,
+		}
 	}
 
 	alive := player.Alive
@@ -239,6 +294,9 @@ func (s *State) applyJoin(event Event) (*Envelope, error) {
 
 	player, exists := s.players[event.PlayerID]
 	if exists {
+		if event.Spectator {
+			return nil, ErrParticipantTypeMismatch
+		}
 		if strings.TrimSpace(event.ReconnectToken) == "" {
 			return nil, ErrReconnectTokenRequired
 		}
@@ -247,6 +305,44 @@ func (s *State) applyJoin(event Event) (*Envelope, error) {
 		}
 		player.Name = strings.TrimSpace(event.PlayerName)
 		player.Connected = true
+		s.ensureConnectedOwner()
+		s.touch(event.At)
+		return stateEnvelope(s.Snapshot()), nil
+	}
+
+	spectator, exists := s.spectators[event.PlayerID]
+	if exists {
+		if !event.Spectator {
+			return nil, ErrParticipantTypeMismatch
+		}
+		if strings.TrimSpace(event.ReconnectToken) == "" {
+			return nil, ErrReconnectTokenRequired
+		}
+		if event.ReconnectToken != spectator.ReconnectToken {
+			return nil, ErrInvalidReconnectToken
+		}
+		spectator.Name = strings.TrimSpace(event.PlayerName)
+		spectator.Connected = true
+		s.touch(event.At)
+		return stateEnvelope(s.Snapshot()), nil
+	}
+
+	if s.locked {
+		return nil, ErrRoomLocked
+	}
+
+	if event.Spectator {
+		reconnectToken, err := newReconnectToken()
+		if err != nil {
+			return nil, err
+		}
+		s.spectators[event.PlayerID] = &Spectator{
+			ID:             event.PlayerID,
+			Name:           strings.TrimSpace(event.PlayerName),
+			ReconnectToken: reconnectToken,
+			Connected:      true,
+			JoinedAt:       event.At,
+		}
 		s.touch(event.At)
 		return stateEnvelope(s.Snapshot()), nil
 	}
@@ -254,12 +350,14 @@ func (s *State) applyJoin(event Event) (*Envelope, error) {
 	if s.phase != PhaseWaiting {
 		return nil, ErrRoomNotJoinable
 	}
+	if len(s.players) >= s.maxPlayers {
+		return nil, ErrRoomFull
+	}
 
 	reconnectToken, err := newReconnectToken()
 	if err != nil {
 		return nil, err
 	}
-
 	s.players[event.PlayerID] = &Player{
 		ID:             event.PlayerID,
 		Name:           strings.TrimSpace(event.PlayerName),
@@ -278,17 +376,31 @@ func (s *State) applyJoin(event Event) (*Envelope, error) {
 
 func (s *State) applyLeave(event Event) (*Envelope, error) {
 	player, ok := s.players[event.PlayerID]
-	if !ok {
-		return nil, ErrPlayerNotFound
+	if ok {
+		if s.phase == PhaseWaiting {
+			delete(s.players, event.PlayerID)
+			if s.ownerID == event.PlayerID {
+				s.ownerID = s.nextOwnerID()
+			}
+		} else {
+			player.Connected = false
+			if s.ownerID == event.PlayerID {
+				s.ensureConnectedOwner()
+			}
+		}
+
+		s.touch(event.At)
+		return stateEnvelope(s.Snapshot()), nil
 	}
 
+	spectator, ok := s.spectators[event.PlayerID]
+	if !ok {
+		return nil, ErrParticipantNotFound
+	}
 	if s.phase == PhaseWaiting {
-		delete(s.players, event.PlayerID)
-		if s.ownerID == event.PlayerID {
-			s.ownerID = s.nextOwnerID()
-		}
+		delete(s.spectators, event.PlayerID)
 	} else {
-		player.Connected = false
+		spectator.Connected = false
 	}
 
 	s.touch(event.At)
@@ -354,11 +466,21 @@ func (s *State) applyStartGame(event Event) (*Envelope, error) {
 
 func (s *State) applyChat(event Event) (*Envelope, error) {
 	player, ok := s.players[event.PlayerID]
-	if !ok {
-		return nil, ErrPlayerNotFound
-	}
-	if s.phase != PhaseWaiting && s.phase != PhaseFinished && !player.Alive {
-		return nil, ErrPlayerDead
+	name := ""
+	if ok {
+		if s.phase != PhaseWaiting && s.phase != PhaseFinished && !player.Alive {
+			return nil, ErrPlayerDead
+		}
+		name = player.Name
+	} else {
+		spectator, spectatorOK := s.spectators[event.PlayerID]
+		if !spectatorOK {
+			return nil, ErrParticipantNotFound
+		}
+		if s.phase != PhaseWaiting && s.phase != PhaseFinished {
+			return nil, ErrSpectatorCannotChat
+		}
+		name = spectator.Name
 	}
 
 	message := strings.TrimSpace(event.Message)
@@ -374,8 +496,8 @@ func (s *State) applyChat(event Event) (*Envelope, error) {
 		Type: "chat",
 		Chat: &ChatMessage{
 			RoomID:   s.roomID,
-			PlayerID: player.ID,
-			Name:     player.Name,
+			PlayerID: event.PlayerID,
+			Name:     name,
 			Message:  message,
 			SentAt:   event.At,
 		},
@@ -526,6 +648,120 @@ func (s *State) applyShoot(event Event) (*Envelope, error) {
 		s.resolveVote(event.At)
 	}
 
+	s.touch(event.At)
+	return stateEnvelope(s.Snapshot()), nil
+}
+
+func (s *State) applyTransferOwner(event Event) (*Envelope, error) {
+	if event.PlayerID != s.ownerID {
+		return nil, ErrOwnerOnly
+	}
+
+	targetID := strings.TrimSpace(event.TargetID)
+	target, ok := s.players[targetID]
+	if !ok || !target.Connected {
+		return nil, ErrInvalidOwnerTarget
+	}
+
+	s.ownerID = target.ID
+	s.touch(event.At)
+	return stateEnvelope(s.Snapshot()), nil
+}
+
+func (s *State) applyKickParticipant(event Event) (*Envelope, error) {
+	if event.PlayerID != s.ownerID {
+		return nil, ErrOwnerOnly
+	}
+	if s.phase != PhaseWaiting && s.phase != PhaseFinished {
+		return nil, ErrKickNotAllowed
+	}
+
+	targetID := strings.TrimSpace(event.TargetID)
+	if targetID == s.ownerID {
+		return nil, ErrCannotKickOwner
+	}
+	if _, ok := s.players[targetID]; ok {
+		delete(s.players, targetID)
+		delete(s.nightActions, targetID)
+		delete(s.votes, targetID)
+		delete(s.investigations, targetID)
+		for voterID, votedFor := range s.votes {
+			if votedFor == targetID {
+				s.votes[voterID] = ""
+			}
+		}
+		s.touch(event.At)
+		return stateEnvelope(s.Snapshot()), nil
+	}
+	if _, ok := s.spectators[targetID]; ok {
+		delete(s.spectators, targetID)
+		s.touch(event.At)
+		return stateEnvelope(s.Snapshot()), nil
+	}
+	return nil, ErrParticipantNotFound
+}
+
+func (s *State) applySetRoomLocked(event Event) (*Envelope, error) {
+	if event.PlayerID != s.ownerID {
+		return nil, ErrOwnerOnly
+	}
+
+	s.locked = event.Locked
+	s.touch(event.At)
+	return stateEnvelope(s.Snapshot()), nil
+}
+
+func (s *State) applySetPlayerLimit(event Event) (*Envelope, error) {
+	if event.PlayerID != s.ownerID {
+		return nil, ErrOwnerOnly
+	}
+	if s.phase != PhaseWaiting && s.phase != PhaseFinished {
+		return nil, ErrWrongPhase
+	}
+	if event.MaxPlayers < MinPlayersToStart || event.MaxPlayers > MaxPlayersAllowed {
+		return nil, ErrPlayerLimitOutOfRange
+	}
+	if event.MaxPlayers < len(s.players) {
+		return nil, ErrPlayerLimitBelowCurrent
+	}
+
+	s.maxPlayers = event.MaxPlayers
+	s.touch(event.At)
+	return stateEnvelope(s.Snapshot()), nil
+}
+
+func (s *State) applyReturnToWaiting(event Event) (*Envelope, error) {
+	if event.PlayerID != s.ownerID {
+		return nil, ErrOwnerOnly
+	}
+	if s.phase == PhaseWaiting {
+		return nil, ErrAlreadyWaiting
+	}
+
+	for playerID, player := range s.players {
+		if !player.Connected {
+			delete(s.players, playerID)
+			continue
+		}
+		player.Ready = false
+		player.Role = ""
+		player.Alive = true
+		player.ShooterUsed = false
+	}
+	for spectatorID, spectator := range s.spectators {
+		if !spectator.Connected {
+			delete(s.spectators, spectatorID)
+		}
+	}
+
+	s.ensureConnectedOwner()
+	s.enterPhase(PhaseWaiting, event.At)
+	s.round = 0
+	s.nightActions = make(map[string]NightAction)
+	s.votes = make(map[string]string)
+	s.investigations = make(map[string][]InvestigationResult)
+	s.result = nil
+	s.log = nil
 	s.touch(event.At)
 	return stateEnvelope(s.Snapshot()), nil
 }
@@ -718,6 +954,18 @@ func (s *State) nextOwnerID() string {
 		return ""
 	}
 	return ids[0]
+}
+
+func (s *State) ensureConnectedOwner() {
+	if owner, ok := s.players[s.ownerID]; ok && owner.Connected {
+		return
+	}
+	for _, playerID := range s.sortedPlayerIDs() {
+		if s.players[playerID].Connected {
+			s.ownerID = playerID
+			return
+		}
+	}
 }
 
 func (s *State) livingPlayer(playerID string) (*Player, error) {

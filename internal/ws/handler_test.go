@@ -3,6 +3,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -358,6 +359,129 @@ func TestHandlerRateLimitsGameEventsBeforeRoomDispatch(t *testing.T) {
 	assertNextChat(t, owner, "guest", "separate bucket")
 }
 
+func TestHandlerSupportsRoomAdministration(t *testing.T) {
+	server := httptest.NewServer(NewHandler(room.NewHub()))
+	defer server.Close()
+
+	owner := connectClient(t, server.URL, "owner", "Owner")
+	guest := connectClient(t, server.URL, "guest", "Guest")
+	defer closeClients([]*testClient{owner, guest})
+
+	for _, client := range []*testClient{owner, guest} {
+		readStateUntil(t, client, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+			return len(state.Players) == 2
+		})
+	}
+
+	writeClientEvent(t, owner, map[string]any{"type": "set_player_limit", "max_players": 2})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.MaxPlayers == 2
+	})
+	writeClientEvent(t, owner, map[string]any{"type": "set_room_locked", "locked": true})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.Locked
+	})
+
+	lockedOut := connectClient(t, server.URL, "locked-out", "Locked Out")
+	defer lockedOut.conn.Close()
+	readEnvelopeUntil(t, lockedOut, func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && envelope.Error == room.ErrRoomLocked.Error()
+	})
+	assertPolicyViolationClose(t, lockedOut, room.ErrRoomLocked.Error())
+
+	writeClientEvent(t, owner, map[string]any{"type": "set_room_locked", "locked": false})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return !state.Locked
+	})
+	fullRoom := connectClient(t, server.URL, "full-room", "Full Room")
+	defer fullRoom.conn.Close()
+	readEnvelopeUntil(t, fullRoom, func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && envelope.Error == room.ErrRoomFull.Error()
+	})
+	assertPolicyViolationClose(t, fullRoom, room.ErrRoomFull.Error())
+
+	writeClientEvent(t, owner, map[string]any{"type": "transfer_owner", "target_id": "guest"})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.OwnerID == "guest"
+	})
+}
+
+func TestHandlerSupportsActiveSpectatorsAndReturnToWaiting(t *testing.T) {
+	server := httptest.NewServer(NewHandler(room.NewHub()))
+	defer server.Close()
+
+	owner := connectClient(t, server.URL, "owner", "Owner")
+	guest := connectClient(t, server.URL, "guest", "Guest")
+	defer closeClients([]*testClient{owner, guest})
+
+	for _, client := range []*testClient{owner, guest} {
+		readStateUntil(t, client, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+			return len(state.Players) == 2
+		})
+	}
+	writeClientEvent(t, guest, map[string]any{"type": "ready", "ready": true})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return playerReady(t, state, "guest")
+	})
+	writeClientEvent(t, owner, map[string]any{"type": "start_game"})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.Phase == room.PhaseNight
+	})
+
+	spectator := connectSpectator(t, server.URL, "spectator", "Spectator")
+	defer spectator.conn.Close()
+	observing := readStateUntil(t, spectator, func(state *room.Snapshot, private *room.PrivatePlayerView) bool {
+		return state.Phase == room.PhaseNight && private != nil && private.Spectator
+	})
+	if len(observing.State.Players) != 2 || len(observing.State.Spectators) != 1 {
+		t.Fatalf("players/spectators = %d/%d, want 2/1", len(observing.State.Players), len(observing.State.Spectators))
+	}
+
+	writeClientEvent(t, spectator, map[string]any{"type": "chat", "message": "active spoiler"})
+	readEnvelopeUntil(t, spectator, func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && envelope.Error == room.ErrSpectatorCannotChat.Error()
+	})
+
+	writeClientEvent(t, owner, map[string]any{"type": "return_to_waiting"})
+	for _, client := range []*testClient{owner, spectator} {
+		readStateUntil(t, client, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+			return state.Phase == room.PhaseWaiting
+		})
+	}
+	writeClientEvent(t, spectator, map[string]any{"type": "chat", "message": "hello after reset"})
+	assertNextChat(t, owner, "spectator", "hello after reset")
+}
+
+func TestHandlerClosesKickedParticipantConnection(t *testing.T) {
+	server := httptest.NewServer(NewHandler(room.NewHub()))
+	defer server.Close()
+
+	owner := connectClient(t, server.URL, "owner", "Owner")
+	guest := connectClient(t, server.URL, "guest", "Guest")
+	defer closeClients([]*testClient{owner, guest})
+
+	for _, client := range []*testClient{owner, guest} {
+		readStateUntil(t, client, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+			return len(state.Players) == 2
+		})
+	}
+
+	writeClientEvent(t, owner, map[string]any{"type": "kick_participant", "target_id": "guest"})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return len(state.Players) == 1
+	})
+	readEnvelopeUntil(t, guest, func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && envelope.Error == room.ErrKicked.Error()
+	})
+
+	if err := guest.conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set kicked connection deadline: %v", err)
+	}
+	if _, _, err := guest.conn.ReadMessage(); err == nil {
+		t.Fatal("kicked participant connection remained open")
+	}
+}
+
 func assertSnapshotDeadline(t *testing.T, state *room.Snapshot, duration time.Duration) {
 	t.Helper()
 	if state.PhaseStartedAt.IsZero() {
@@ -376,10 +500,20 @@ func assertSnapshotDeadline(t *testing.T, state *room.Snapshot, duration time.Du
 
 func connectClient(t *testing.T, serverURL, playerID, playerName string) *testClient {
 	t.Helper()
-	return connectClientWithToken(t, serverURL, playerID, playerName, "")
+	return connectParticipant(t, serverURL, playerID, playerName, "", false)
 }
 
 func connectClientWithToken(t *testing.T, serverURL, playerID, playerName, reconnectToken string) *testClient {
+	t.Helper()
+	return connectParticipant(t, serverURL, playerID, playerName, reconnectToken, false)
+}
+
+func connectSpectator(t *testing.T, serverURL, playerID, playerName string) *testClient {
+	t.Helper()
+	return connectParticipant(t, serverURL, playerID, playerName, "", true)
+}
+
+func connectParticipant(t *testing.T, serverURL, playerID, playerName, reconnectToken string, spectator bool) *testClient {
 	t.Helper()
 
 	parsed, err := url.Parse(serverURL)
@@ -393,6 +527,9 @@ func connectClientWithToken(t *testing.T, serverURL, playerID, playerName, recon
 	query.Set("name", playerName)
 	if reconnectToken != "" {
 		query.Set("reconnect_token", reconnectToken)
+	}
+	if spectator {
+		query.Set("spectator", "true")
 	}
 	parsed.RawQuery = query.Encode()
 
@@ -464,6 +601,32 @@ func assertNextChat(t *testing.T, client *testClient, playerID, message string) 
 	}
 	if envelope.Chat.PlayerID != playerID || envelope.Chat.Message != message {
 		t.Fatalf("chat = %#v, want player %s message %q", envelope.Chat, playerID, message)
+	}
+}
+
+func assertPolicyViolationClose(t *testing.T, client *testClient, reason string) {
+	t.Helper()
+
+	if err := client.conn.SetReadDeadline(time.Now().Add(2 * time.Second)); err != nil {
+		t.Fatalf("set close deadline for %s: %v", client.id, err)
+	}
+	_, _, err := client.conn.ReadMessage()
+	if err == nil {
+		t.Fatalf("connection for %s remained open", client.id)
+	}
+	var closeError *websocket.CloseError
+	if !errors.As(err, &closeError) {
+		t.Fatalf("close error for %s = %v, want WebSocket close frame", client.id, err)
+	}
+	if closeError.Code != websocket.ClosePolicyViolation || closeError.Text != reason {
+		t.Fatalf(
+			"close frame for %s = code %d reason %q, want code %d reason %q",
+			client.id,
+			closeError.Code,
+			closeError.Text,
+			websocket.ClosePolicyViolation,
+			reason,
+		)
 	}
 }
 

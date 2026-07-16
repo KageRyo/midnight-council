@@ -18,9 +18,9 @@ internal/webui/
 
 ## Joining a Room
 
-1. Enter a room ID and display name.
+1. Enter a room ID and display name, then choose whether to join as a spectator.
 2. The client creates a random player ID unless that room already has a saved browser session.
-3. It opens `/ws/rooms/{room_id}` with `player_id`, `name`, and, when available, `reconnect_token` query parameters.
+3. It opens `/ws/rooms/{room_id}` with `player_id`, `name`, optional `spectator=true`, and, when available, `reconnect_token` query parameters.
 4. The game view appears only after the first valid state envelope arrives.
 
 The browser UI limits room IDs to 2–48 ASCII letters, digits, hyphens, or underscores. Display names are limited to 32 JavaScript characters; the server still performs its own required-field validation.
@@ -33,12 +33,14 @@ The client treats each server state envelope as authoritative and re-renders the
 
 - connection, room, phase, round, and server-synchronized countdown status;
 - public player seats and connection state;
+- room access state, player capacity, and the spectator list;
 - the current player's private role and life state;
 - detective investigation results;
 - controls allowed by the current phase and `private.available`;
 - shooter availability;
 - final winner and public role reveal;
 - the capped public game event log.
+- owner-only room administration controls.
 
 It does not calculate kills, vote results, role assignments, or winners locally. Client-side disabled buttons are a usability feature only; the room state validates every submitted event again.
 
@@ -46,13 +48,21 @@ It does not calculate kills, vote results, role assignments, or winners locally.
 
 | Phase | Browser actions |
 | --- | --- |
-| `WAITING` | Non-owner ready toggle; owner start when eligible; chat |
-| `NIGHT` | Role-specific target action or pass; missing actions pass at timeout; chat for living players |
-| `DAY_DISCUSSION` | Owner may start voting early; deadline starts it automatically; shooter may fire; chat |
-| `DAY_VOTING` | Living players vote or abstain; missing votes abstain at timeout; shooter may fire; chat |
-| `FINISHED` | Final result and roles; chat |
+| `WAITING` | Non-owner player ready toggle; owner start and room administration; player and spectator chat |
+| `NIGHT` | Role-specific target action or pass; missing actions pass at timeout; living-player chat; spectators observe |
+| `DAY_DISCUSSION` | Owner may start voting early; deadline starts it automatically; shooter may fire; living-player chat; spectators observe |
+| `DAY_VOTING` | Living players vote or abstain; missing votes abstain at timeout; shooter may fire; living-player chat; spectators observe |
+| `FINISHED` | Final result and roles; owner may administer or return to waiting; player and spectator chat |
 
 Night actors can change their submitted target until the last required action causes resolution. Voters can similarly change a non-empty vote until the last living player submits. The current private projection cannot distinguish a submitted abstention from no vote, so the UI continues to describe abstention as available until resolution.
+
+## Room Administration and Rematches
+
+The owner panel reflects authoritative room state. It can lock or unlock new joins, set the player cap from 2 through 20 while waiting or after a game, transfer ownership to another connected player, and remove players or spectators while waiting or after a game. These controls disappear immediately after ownership transfers.
+
+During an active or finished game, the owner can return the room to `WAITING`. The client asks for confirmation because the server clears the current result and game log. Connected identities remain in the room, player readiness resets, and the same group can prepare for another match without changing invitation links.
+
+Spectators have a separate identity card and participant list. They never see role actions, readiness, or voting controls. Spectator chat is available while waiting and after settlement, but disabled during active play to prevent live information from being relayed into the game.
 
 ## Server-Synchronized Countdown
 
@@ -65,9 +75,9 @@ At `00:00`, the browser stops its local display and waits for the next authorita
 The client stores two versioned local-storage entries:
 
 - the most recently used display name;
-- a map of room IDs to player ID, display name, and reconnect token.
+- a map of room IDs to participant ID, display name, spectator flag, and reconnect token.
 
-On refresh, the room query parameter and saved name repopulate the join form. The player explicitly selects **Enter Council** again, after which the saved token reclaims the existing seat. Missing or rejected reconnect credentials are cleared so the next attempt can create a new player ID where the room state permits it.
+On refresh, the room query parameter, saved name, and participant type repopulate the join form. The participant explicitly selects **Enter Council** again, after which the saved token reclaims the existing identity. Missing or rejected reconnect credentials are cleared so the next attempt can create a new identity where the room state permits it. A participant removed by the owner also loses the saved room session.
 
 Rooms opened in multiple tabs of the same browser profile share local storage and therefore represent the same saved seat. Use separate profiles, browsers, or private contexts to test multiple players on one machine.
 
@@ -77,7 +87,7 @@ Reconnect tokens are bearer credentials. Do not log them, include them in invita
 
 Chat messages are broadcast live and the browser keeps only the latest 150 messages received by that page. The room state does not retain chat history, so a refreshed or reconnected client starts with an empty chat panel. Public game events are separate and remain in the room snapshot up to the server's 100-entry cap.
 
-During an active game, dead players cannot chat. The client disables the field, and the server independently rejects attempts.
+During an active game, dead players and spectators cannot chat. The client disables the field, and the server independently rejects attempts.
 
 The server also limits chat and game events with separate per-connection token buckets. When either limit is exceeded, the rejected event never reaches the room actor and the browser presents the returned error as a localized toast. The browser does not predict local token availability; the server remains authoritative, and a normally paced retry succeeds after tokens refill.
 
@@ -109,7 +119,10 @@ For a manual multiplayer check:
 4. Submit or pass all required night actions.
 5. Exercise discussion, voting, and any available shooter action.
 6. Refresh one browser and confirm the reconnect prompt restores its seat.
-7. Run with short phase durations and confirm missing actions, discussion, and votes advance automatically.
+7. Join a spectator during the active game and confirm it receives no role or action controls and cannot chat.
+8. Return to waiting and confirm roles, readiness, result, and game log reset while connected identities remain.
+9. Exercise lock, player cap, kick, and ownership transfer controls.
+10. Run with short phase durations and confirm missing actions, discussion, and votes advance automatically.
 
 The Go suite tests embedded assets and the complete WebSocket game flow:
 
@@ -128,7 +141,6 @@ node --check internal/webui/static/app.js
 - no automatic reconnect loop after a live connection drops;
 - no retained chat history;
 - no audible cues or notifications;
-- no room restart after `FINISHED`;
 - no built-in word list, external moderation provider, reporting, mute, or ban workflow;
 - no frontend unit-test framework or committed browser-test suite;
 - browser-generated player IDs are identities only within an in-memory room, not accounts.

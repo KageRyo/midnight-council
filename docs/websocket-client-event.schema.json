@@ -81,6 +81,60 @@
           "pattern": "\\S"
         }
       }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "target_id"],
+      "properties": {
+        "type": { "const": "transfer_owner" },
+        "target_id": {
+          "type": "string",
+          "pattern": "\\S"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "target_id"],
+      "properties": {
+        "type": { "const": "kick_participant" },
+        "target_id": {
+          "type": "string",
+          "pattern": "\\S"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "locked"],
+      "properties": {
+        "type": { "const": "set_room_locked" },
+        "locked": { "type": "boolean" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "max_players"],
+      "properties": {
+        "type": { "const": "set_player_limit" },
+        "max_players": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 20
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "const": "return_to_waiting" }
+      }
     }
   ]
 }

@@ -206,8 +206,12 @@ func (a *Actor) run(state *State, idleTimeout time.Duration, onIdle func()) {
 		case cmd := <-a.inbox:
 			switch {
 			case cmd.event != nil:
-				envelope, err := state.Apply(*cmd.event)
+				event := *cmd.event
+				envelope, err := state.Apply(event)
 				if err == nil && envelope != nil {
+					if event.Type == EventKickParticipant {
+						disconnectParticipant(subscribers, event.TargetID)
+					}
 					broadcast(state, subscribers, *envelope)
 				}
 				cmd.reply <- result{envelope: envelope, err: err}
@@ -229,6 +233,25 @@ func (a *Actor) run(state *State, idleTimeout time.Duration, onIdle func()) {
 			resetIdleTimer()
 			resetPhaseTimer()
 		}
+	}
+}
+
+func disconnectParticipant(subscribers map[string]subscription, playerID string) {
+	for id, sub := range subscribers {
+		if sub.playerID != playerID {
+			continue
+		}
+		for {
+			select {
+			case <-sub.events:
+			default:
+				sub.events <- Envelope{Type: "error", Error: ErrKicked.Error()}
+				delete(subscribers, id)
+				close(sub.events)
+				goto nextSubscription
+			}
+		}
+	nextSubscription:
 	}
 }
 

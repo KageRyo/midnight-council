@@ -60,6 +60,14 @@
             <label for="player-name">議員名稱</label>
             <input id="player-name" name="name" type="text" maxlength="32" autocomplete="nickname" placeholder="你的顯示名稱" required>
 
+            <label class="check-option" for="join-as-spectator">
+              <input id="join-as-spectator" type="checkbox">
+              <span>
+                <strong>以旁觀者加入</strong>
+                <small>不佔玩家席次，進行中的對局無法公開發言。</small>
+              </span>
+            </label>
+
             <p id="resume-note" class="resume-note" hidden></p>
             <p id="join-error" class="form-error" role="alert" hidden></p>
 
@@ -94,6 +102,14 @@
               <small>回合</small>
               <strong id="round-label">—</strong>
             </div>
+            <div>
+              <small>房間</small>
+              <strong id="room-access">公開</strong>
+            </div>
+            <div>
+              <small>席次</small>
+              <strong id="room-capacity">0 / 12</strong>
+            </div>
             <button id="leave-button" class="ghost-button" type="button">離開</button>
           </div>
         </div>
@@ -123,6 +139,45 @@
                 <span id="player-count" class="count-badge">0</span>
               </div>
               <ul id="player-list" class="player-list"></ul>
+            </section>
+
+            <section id="spectators-card" class="spectators-card panel" aria-labelledby="spectators-title" hidden>
+              <div class="section-title-row compact">
+                <h2 id="spectators-title">旁觀席</h2>
+                <span id="spectator-count" class="count-badge">0</span>
+              </div>
+              <ul id="spectator-list" class="spectator-list"></ul>
+            </section>
+
+            <section id="room-admin-card" class="room-admin-card panel" aria-labelledby="room-admin-title" hidden>
+              <div class="section-title-row compact">
+                <div>
+                  <p class="eyebrow">ROOM CONTROL</p>
+                  <h2 id="room-admin-title">房主管理</h2>
+                </div>
+              </div>
+              <div class="admin-actions">
+                <button id="room-lock-button" class="secondary-button" type="button">鎖定房間</button>
+
+                <form id="player-limit-form">
+                  <label for="player-limit-input">玩家上限</label>
+                  <div class="compact-form-row">
+                    <input id="player-limit-input" type="number" min="2" max="20" required>
+                    <button class="ghost-button" type="submit">更新</button>
+                  </div>
+                </form>
+
+                <form id="owner-transfer-form">
+                  <label for="owner-transfer-target">轉移房主</label>
+                  <div class="compact-form-row">
+                    <select id="owner-transfer-target"></select>
+                    <button class="ghost-button" type="submit">轉移</button>
+                  </div>
+                </form>
+
+                <button id="return-waiting-button" class="danger-button" type="button" hidden>返回等待室</button>
+                <p id="room-admin-hint" class="action-hint"></p>
+              </div>
             </section>
           </aside>
 

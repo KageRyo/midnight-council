@@ -66,7 +66,7 @@
       label: "已結束",
       kicker: "FINAL VERDICT",
       title: "議會已作出裁決",
-      description: "本局所有身分已公開。建立新房間即可開始下一局。",
+      description: "本局所有身分已公開。房主可返回等待室，在同一房間開始下一局。",
       symbol: "✦",
     },
   };
@@ -90,6 +90,7 @@
     roomID: "",
     playerID: "",
     playerName: "",
+    spectator: false,
     state: null,
     private: null,
     chats: [],
@@ -107,6 +108,7 @@
       "join-form",
       "room-id",
       "player-name",
+      "join-as-spectator",
       "random-room-button",
       "resume-note",
       "join-error",
@@ -118,6 +120,8 @@
       "phase-countdown",
       "phase-label",
       "round-label",
+      "room-access",
+      "room-capacity",
       "leave-button",
       "life-badge",
       "role-sigil",
@@ -127,6 +131,17 @@
       "investigation-list",
       "player-count",
       "player-list",
+      "spectators-card",
+      "spectator-count",
+      "spectator-list",
+      "room-admin-card",
+      "room-lock-button",
+      "player-limit-form",
+      "player-limit-input",
+      "owner-transfer-form",
+      "owner-transfer-target",
+      "return-waiting-button",
+      "room-admin-hint",
       "phase-art",
       "phase-kicker",
       "phase-title",
@@ -190,6 +205,10 @@
     ui.leaveButton.addEventListener("click", leaveRoom);
     ui.readyButton.addEventListener("click", toggleReady);
     ui.startGameButton.addEventListener("click", () => sendEvent({ type: "start_game" }));
+    ui.roomLockButton.addEventListener("click", toggleRoomLock);
+    ui.playerLimitForm.addEventListener("submit", updatePlayerLimit);
+    ui.ownerTransferForm.addEventListener("submit", transferOwner);
+    ui.returnWaitingButton.addEventListener("click", returnToWaiting);
     ui.nightActionForm.addEventListener("submit", submitNightAction);
     ui.nightPassButton.addEventListener("click", () => sendEvent({ type: "night_pass" }));
     ui.startVoteButton.addEventListener("click", () => sendEvent({ type: "start_vote" }));
@@ -221,9 +240,11 @@
     }
 
     const session = getSession(roomID);
+    const spectator = session ? session.spectator === true : ui.joinAsSpectator.checked;
     app.roomID = roomID;
     app.playerID = session?.playerID || newPlayerID();
     app.playerName = playerName;
+    app.spectator = spectator;
     app.state = null;
     app.private = null;
     app.chats = [];
@@ -241,6 +262,9 @@
     });
     if (session?.reconnectToken) {
       query.set("reconnect_token", session.reconnectToken);
+    }
+    if (spectator) {
+      query.set("spectator", "true");
     }
 
     const socket = new WebSocket(`${protocol}//${window.location.host}${path}?${query}`);
@@ -274,11 +298,13 @@
         syncServerClock(envelope.state.server_time);
         app.state = envelope.state;
         app.private = envelope.private || null;
+        app.spectator = app.private?.spectator === true;
         if (app.private?.reconnect_token) {
           saveSession(app.roomID, {
             playerID: app.playerID,
             playerName: app.playerName,
             reconnectToken: app.private.reconnect_token,
+            spectator: app.private.spectator === true,
           });
         }
         enterGameView();
@@ -301,9 +327,26 @@
 
   function handleServerError(message) {
     const translated = translateError(message);
+    if (message.includes("removed from room by the owner")) {
+      deleteSession(app.roomID);
+      app.intentionallyClosed = true;
+      app.socket?.close();
+      app.socket = null;
+      app.state = null;
+      app.private = null;
+      app.chats = [];
+      stopCountdown();
+      ui.gameView.hidden = true;
+      ui.joinView.hidden = false;
+      ui.roomId.value = app.roomID;
+      setConnection("offline", "尚未連線");
+      updateResumeNote();
+      showJoinError(translated);
+      return;
+    }
     if (!app.state) {
       showJoinError(translated);
-      if (message.includes("reconnect token")) {
+      if (message.includes("reconnect token") || message.includes("participant type")) {
         deleteSession(app.roomID);
         updateResumeNote();
       }
@@ -312,7 +355,7 @@
     showToast(translated, true);
   }
 
-  function handleSocketClose() {
+  function handleSocketClose(event) {
     ui.joinButton.disabled = false;
     if (app.intentionallyClosed) {
       setConnection("offline", "尚未連線");
@@ -325,7 +368,9 @@
       showToast("與伺服器的連線已中斷。重新整理後可使用保存的憑證重連。", true);
       disableGameInputs();
     } else if (ui.joinError.hidden) {
-      showJoinError("連線已關閉，請確認房間資料後再試一次。");
+      showJoinError(event.reason
+        ? translateError(event.reason)
+        : "連線已關閉，請確認房間資料後再試一次。");
     }
   }
 
@@ -367,6 +412,46 @@
     const self = currentPlayer();
     if (self) {
       sendEvent({ type: "ready", ready: !self.ready });
+    }
+  }
+
+  function toggleRoomLock() {
+    sendEvent({ type: "set_room_locked", locked: !app.state.locked });
+  }
+
+  function updatePlayerLimit(event) {
+    event.preventDefault();
+    const maxPlayers = Number.parseInt(ui.playerLimitInput.value, 10);
+    if (!Number.isInteger(maxPlayers) || maxPlayers < 2 || maxPlayers > 20) {
+      showToast("玩家上限必須介於 2 到 20。", true);
+      return;
+    }
+    sendEvent({ type: "set_player_limit", max_players: maxPlayers });
+  }
+
+  function transferOwner(event) {
+    event.preventDefault();
+    const targetID = ui.ownerTransferTarget.value;
+    if (!targetID) {
+      showToast("目前沒有可轉移房主的連線玩家。", true);
+      return;
+    }
+    sendEvent({ type: "transfer_owner", target_id: targetID });
+  }
+
+  function returnToWaiting() {
+    const active = !["WAITING", "FINISHED"].includes(app.state.phase);
+    const prompt = active
+      ? "確定要中止目前對局並返回等待室嗎？本局進度會被清除。"
+      : "確定要返回等待室並準備下一局嗎？";
+    if (window.confirm(prompt)) {
+      sendEvent({ type: "return_to_waiting" });
+    }
+  }
+
+  function kickParticipant(participantID, participantName) {
+    if (window.confirm(`確定要將 ${participantName} 移出房間嗎？`)) {
+      sendEvent({ type: "kick_participant", target_id: participantID });
     }
   }
 
@@ -420,6 +505,8 @@
     renderRoomHeader();
     renderIdentity();
     renderPlayers();
+    renderSpectators();
+    renderRoomAdmin();
     renderPhase();
     renderActions();
     renderChat();
@@ -432,9 +519,23 @@
     ui.roomCode.textContent = app.state.room_id;
     ui.phaseLabel.textContent = phase.label;
     ui.roundLabel.textContent = app.state.round > 0 ? String(app.state.round) : "—";
+    ui.roomAccess.textContent = app.state.locked ? "已鎖定" : "公開";
+    ui.roomCapacity.textContent = `${app.state.players?.length || 0} / ${app.state.max_players || 12}`;
   }
 
   function renderIdentity() {
+    if (app.private?.spectator) {
+      ui.lifeBadge.textContent = "旁觀";
+      ui.lifeBadge.classList.remove("dead");
+      ui.roleSigil.dataset.role = "SPECTATOR";
+      ui.roleSigil.textContent = "◌";
+      ui.roleName.textContent = "旁觀者";
+      ui.roleDescription.textContent = "你不佔玩家席次，也不會取得角色或參與遊戲行動。";
+      ui.investigationBlock.hidden = true;
+      ui.investigationList.replaceChildren();
+      return;
+    }
+
     const role = roles[app.private?.role];
     const alive = app.private?.alive !== false;
 
@@ -459,6 +560,7 @@
 
   function renderPlayers() {
     const players = app.state.players || [];
+    const canKick = isCurrentOwner() && ["WAITING", "FINISHED"].includes(app.state.phase);
     ui.playerCount.textContent = String(players.length);
 
     const items = players.map((player) => {
@@ -481,11 +583,83 @@
       state.classList.toggle("ready", app.state.phase === "WAITING" && (player.owner || player.ready));
       state.classList.toggle("connected", app.state.phase !== "WAITING" && player.connected);
       state.title = player.connected ? "已連線" : "已斷線";
-      item.append(avatar, copy, state);
+      const actions = element("span", "participant-actions");
+      actions.append(state);
+      if (canKick && !player.owner) {
+        const remove = element("button", "participant-remove-button", "×");
+        remove.type = "button";
+        remove.title = `移出 ${player.name}`;
+        remove.setAttribute("aria-label", `將 ${player.name} 移出房間`);
+        remove.addEventListener("click", () => kickParticipant(player.id, player.name));
+        actions.append(remove);
+      }
+      item.append(avatar, copy, actions);
       return item;
     });
 
     ui.playerList.replaceChildren(...items);
+  }
+
+  function renderSpectators() {
+    const spectators = app.state.spectators || [];
+    const canKick = isCurrentOwner() && ["WAITING", "FINISHED"].includes(app.state.phase);
+    ui.spectatorsCard.hidden = spectators.length === 0;
+    ui.spectatorCount.textContent = String(spectators.length);
+
+    const items = spectators.map((spectator) => {
+      const item = element("li", "player-item");
+      item.classList.toggle("self", spectator.id === app.playerID);
+      const avatar = element("span", "player-avatar", initials(spectator.name));
+      const copy = element("span", "player-copy");
+      const name = element("strong", "", spectator.name + (spectator.id === app.playerID ? "（你）" : ""));
+      copy.append(name, element("small", "", spectator.connected ? "旁觀者" : "旁觀者 · 已斷線"));
+
+      const actions = element("span", "participant-actions");
+      const state = element("span", "player-state");
+      state.classList.toggle("connected", spectator.connected);
+      state.title = spectator.connected ? "已連線" : "已斷線";
+      actions.append(state);
+      if (canKick) {
+        const remove = element("button", "participant-remove-button", "×");
+        remove.type = "button";
+        remove.title = `移出 ${spectator.name}`;
+        remove.setAttribute("aria-label", `將 ${spectator.name} 移出房間`);
+        remove.addEventListener("click", () => kickParticipant(spectator.id, spectator.name));
+        actions.append(remove);
+      }
+      item.append(avatar, copy, actions);
+      return item;
+    });
+
+    ui.spectatorList.replaceChildren(...items);
+  }
+
+  function renderRoomAdmin() {
+    const isOwner = isCurrentOwner();
+    const phaseAllowsRosterChanges = ["WAITING", "FINISHED"].includes(app.state.phase);
+    ui.roomAdminCard.hidden = !isOwner;
+    if (!isOwner) {
+      return;
+    }
+
+    ui.roomLockButton.textContent = app.state.locked ? "解除鎖房" : "鎖定房間";
+    ui.playerLimitInput.value = String(app.state.max_players || 12);
+    ui.playerLimitInput.disabled = !phaseAllowsRosterChanges;
+    ui.playerLimitForm.querySelector("button").disabled = !phaseAllowsRosterChanges;
+
+    const ownerTargets = (app.state.players || []).filter((player) => !player.owner && player.connected);
+    ui.ownerTransferTarget.replaceChildren(
+      option("", ownerTargets.length === 0 ? "沒有可轉移的玩家" : "選擇新房主"),
+      ...ownerTargets.map((player) => option(player.id, player.name)),
+    );
+    ui.ownerTransferTarget.disabled = ownerTargets.length === 0;
+    ui.ownerTransferForm.querySelector("button").disabled = ownerTargets.length === 0;
+
+    ui.returnWaitingButton.hidden = app.state.phase === "WAITING";
+    ui.returnWaitingButton.textContent = app.state.phase === "FINISHED" ? "返回等待室，再來一局" : "中止對局並返回等待室";
+    ui.roomAdminHint.textContent = phaseAllowsRosterChanges
+      ? "等待或結算階段可調整席次與移除參與者。"
+      : "對局進行中仍可鎖房、轉移房主或返回等待室。";
   }
 
   function renderPhase() {
@@ -517,8 +691,16 @@
     ui.shootForm.hidden = true;
 
     const self = currentPlayer();
-    const isOwner = self?.owner === true;
+    const isOwner = isCurrentOwner();
     const phase = app.state.phase;
+
+    if (app.private?.spectator) {
+      ui.phaseDescription.textContent = ["WAITING", "FINISHED"].includes(phase)
+        ? "你正以旁觀者身分留在房間，可閱讀公開資訊與參與公開聊天。"
+        : "你正在旁觀本局；遊戲進行中無法執行動作或在公開頻道發言。";
+      updateChatAvailability();
+      return;
+    }
 
     if (phase === "WAITING") {
       ui.waitingActions.hidden = false;
@@ -670,10 +852,15 @@
     const connected = app.socket?.readyState === WebSocket.OPEN;
     const ongoing = !["WAITING", "FINISHED"].includes(app.state.phase);
     const dead = app.private?.alive === false;
-    const disabled = !connected || (ongoing && dead);
+    const spectator = app.private?.spectator === true;
+    const disabled = !connected || (ongoing && (dead || spectator));
     ui.chatMessage.disabled = disabled;
     ui.chatForm.querySelector("button").disabled = disabled;
-    ui.chatHint.textContent = ongoing && dead ? "出局玩家在遊戲結束前無法公開發言。" : "";
+    ui.chatHint.textContent = ongoing && spectator
+      ? "旁觀者在遊戲結束前無法公開發言。"
+      : ongoing && dead
+        ? "出局玩家在遊戲結束前無法公開發言。"
+        : "";
   }
 
   function disableGameInputs() {
@@ -778,6 +965,10 @@
     return playerByID(app.playerID);
   }
 
+  function isCurrentOwner() {
+    return app.private?.spectator !== true && app.state?.owner_id === app.playerID;
+  }
+
   function playerByID(playerID) {
     return app.state?.players?.find((player) => player.id === playerID);
   }
@@ -825,11 +1016,23 @@
       ["reconnect token is required", "這個玩家席次需要重連憑證；已清除本機舊資料，請再加入一次。"],
       ["reconnect token is invalid", "重連憑證無效；已清除本機舊資料，請再加入一次。"],
       ["room is not joinable", "遊戲已經開始，目前無法加入新玩家。"],
+      ["room is locked", "房間目前已鎖定，只允許既有席次重連。"],
+      ["room player limit has been reached", "房間的玩家席次已滿。你仍可選擇以旁觀者加入未鎖定的房間。"],
       ["only the room owner", "只有房主可以執行這項操作。"],
       ["all non-owner players must be ready", "所有非房主玩家都必須先準備。"],
       ["not enough players", "玩家人數不足，至少需要兩名玩家。"],
       ["action is not allowed", "目前階段無法執行這項操作。"],
       ["player is dead", "你已出局，無法執行這項操作。"],
+      ["spectators cannot chat", "旁觀者在對局進行中無法公開發言。"],
+      ["participant type does not match", "保存的席次類型不符；已清除本機舊資料，請重新加入。"],
+      ["participant not found", "這個席次已不存在。"],
+      ["the room owner cannot be kicked", "房主不能移除自己，請先轉移房主。"],
+      ["participants can only be kicked", "只能在等待室或遊戲結束後移除參與者。"],
+      ["removed from room by the owner", "你已被房主移出房間。"],
+      ["new owner must be a connected seated player", "新房主必須是目前在線的玩家。"],
+      ["player limit is out of range", "玩家上限必須介於 2 到 20。"],
+      ["player limit cannot be below", "玩家上限不能低於目前已就座人數。"],
+      ["room is already waiting", "房間目前已在等待室。"],
       ["target is invalid", "所選目標已失效，請重新選擇。"],
       ["self target is not allowed", "這個能力不能以自己為目標。"],
       ["message is too long", "訊息超過 500 bytes，請縮短內容。"],
@@ -844,9 +1047,11 @@
   function updateResumeNote() {
     const roomID = ui.roomId.value.trim();
     const session = getSession(roomID);
+    ui.joinAsSpectator.checked = session?.spectator === true;
+    ui.joinAsSpectator.disabled = Boolean(session);
     ui.resumeNote.hidden = !session;
     ui.resumeNote.textContent = session
-      ? `找到 ${session.playerName || "先前玩家"} 的重連資料，加入時將嘗試取回原席次。`
+      ? `找到 ${session.playerName || "先前參與者"} 的${session.spectator ? "旁觀席" : "玩家席次"}重連資料，加入時將嘗試取回原席次。`
       : "";
     if (session?.playerName && !ui.playerName.value.trim()) {
       ui.playerName.value = session.playerName;

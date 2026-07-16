@@ -2,7 +2,7 @@
 
 Midnight Council is a browser-based, real-time social deduction game prototype inspired by classic night-and-day party games.
 
-The Go server and its embedded web client already support a complete playable loop: nickname-based join, room readiness, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, win detection, settlement, and reconnect-token based disconnect/reconnect.
+The Go server and its embedded web client already support a repeatable playable loop: nickname-based player or spectator join, room readiness and administration, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, win detection, settlement, return to waiting, rematches, and reconnect-token based disconnect/reconnect.
 
 ## Current Scope
 
@@ -24,6 +24,9 @@ The Go server and its embedded web client already support a complete playable lo
 - Shooter one-shot day action
 - Win detection and game result reveal
 - Reconnect token for existing player seats
+- Player and spectator participation modes
+- Owner transfer, kick, room lock, and configurable player cap
+- Return-to-waiting reset and same-room rematches
 - Room idle timeout and hub cleanup
 - Public event log for game flow
 - Strict WebSocket client event schema validation
@@ -122,7 +125,8 @@ The root route serves a responsive Traditional Chinese game interface embedded i
 The client supports:
 
 - room creation and invitation links
-- player readiness and owner controls
+- player or spectator join
+- player readiness, owner administration, and same-room rematches
 - private role and investigation displays
 - role-aware night actions and passing
 - public discussion, voting, abstaining, and shooter actions
@@ -152,6 +156,12 @@ Connect:
 ws://localhost:8080/ws/rooms/{room_id}?player_id={player_id}&name={display_name}
 ```
 
+Join as a spectator:
+
+```text
+ws://localhost:8080/ws/rooms/{room_id}?player_id={player_id}&name={display_name}&spectator=true
+```
+
 Reconnect to an existing player seat:
 
 ```text
@@ -165,12 +175,16 @@ The server broadcasts envelopes:
   "type": "state",
   "state": {
     "room_id": "demo",
+    "owner_id": "p1",
     "phase": "NIGHT",
     "phase_started_at": "2026-07-14T09:00:00Z",
     "phase_deadline": "2026-07-14T09:01:30Z",
     "server_time": "2026-07-14T09:00:10Z",
     "round": 1,
-    "players": []
+    "players": [],
+    "spectators": [],
+    "locked": false,
+    "max_players": 12
   },
   "private": {
     "player_id": "p1",
@@ -239,9 +253,33 @@ Shooter day action:
 {"type":"shoot","target_id":"p2"}
 ```
 
+Owner room administration:
+
+```json
+{"type":"transfer_owner","target_id":"p2"}
+```
+
+```json
+{"type":"kick_participant","target_id":"p2"}
+```
+
+```json
+{"type":"set_room_locked","locked":true}
+```
+
+```json
+{"type":"set_player_limit","max_players":8}
+```
+
+Return an active or finished room to `WAITING` for a rematch:
+
+```json
+{"type":"return_to_waiting"}
+```
+
 ## Game Flow
 
-1. Players connect to the same room URL.
+1. Players and optional spectators connect to the same room URL.
 2. Non-owner players send `ready`.
 3. The owner sends `start_game`.
 4. The server shuffles roles and enters `NIGHT`.
@@ -251,6 +289,7 @@ Shooter day action:
 8. The owner sends `start_vote`, or the discussion deadline starts voting automatically.
 9. Alive players vote. The server resolves execution when everyone has voted; missing votes become abstentions at the voting deadline.
 10. The server either finishes the game or starts the next night.
+11. The owner can return the room to `WAITING`; connected seats remain, game-only state is cleared, and players ready for the next match.
 
 Win rules:
 

@@ -64,3 +64,70 @@ func TestDecodeClientEventRejectsExtraShapeFields(t *testing.T) {
 		t.Fatal("expected shape validation error")
 	}
 }
+
+func TestDecodeClientEventMapsRoomLifecycleEvents(t *testing.T) {
+	tests := []struct {
+		name       string
+		payload    string
+		eventType  room.EventType
+		targetID   string
+		locked     bool
+		maxPlayers int
+	}{
+		{
+			name:      "transfer owner",
+			payload:   `{"type":"transfer_owner","target_id":"p2"}`,
+			eventType: room.EventTransferOwner,
+			targetID:  "p2",
+		},
+		{
+			name:      "kick participant",
+			payload:   `{"type":"kick_participant","target_id":"p2"}`,
+			eventType: room.EventKickParticipant,
+			targetID:  "p2",
+		},
+		{
+			name:      "lock room",
+			payload:   `{"type":"set_room_locked","locked":true}`,
+			eventType: room.EventSetRoomLocked,
+			locked:    true,
+		},
+		{
+			name:       "set player limit",
+			payload:    `{"type":"set_player_limit","max_players":8}`,
+			eventType:  room.EventSetPlayerLimit,
+			maxPlayers: 8,
+		},
+		{
+			name:      "return to waiting",
+			payload:   `{"type":"return_to_waiting"}`,
+			eventType: room.EventReturnToWaiting,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event, err := DecodeClientEvent(strings.NewReader(test.payload))
+			if err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			roomEvent := event.RoomEvent("p1", "Player")
+			if roomEvent.Type != test.eventType || roomEvent.TargetID != test.targetID || roomEvent.Locked != test.locked || roomEvent.MaxPlayers != test.maxPlayers {
+				t.Fatalf("room event = %#v", roomEvent)
+			}
+		})
+	}
+}
+
+func TestDecodeClientEventRequiresRoomLifecycleFields(t *testing.T) {
+	for _, payload := range []string{
+		`{"type":"transfer_owner"}`,
+		`{"type":"kick_participant"}`,
+		`{"type":"set_room_locked"}`,
+		`{"type":"set_player_limit"}`,
+	} {
+		if _, err := DecodeClientEvent(strings.NewReader(payload)); err == nil {
+			t.Fatalf("payload %s should be rejected", payload)
+		}
+	}
+}

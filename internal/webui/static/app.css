@@ -446,6 +446,47 @@ h2 {
   margin-top: 22px;
 }
 
+.check-option {
+  display: flex;
+  gap: 11px;
+  align-items: flex-start;
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(6, 9, 17, 0.26);
+  cursor: pointer;
+}
+
+.check-option input {
+  width: 17px;
+  min-height: 17px;
+  margin: 2px 0 0;
+  accent-color: var(--gold);
+}
+
+.check-option span,
+.check-option strong,
+.check-option small {
+  display: block;
+}
+
+.check-option span {
+  min-width: 0;
+}
+
+.check-option strong {
+  color: #d9deeb;
+  font-size: 0.75rem;
+}
+
+.check-option small {
+  margin-top: 3px;
+  color: var(--faint);
+  font-size: 0.65rem;
+  line-height: 1.45;
+}
+
 .secondary-button {
   min-height: 44px;
   padding: 0 16px;
@@ -595,6 +636,8 @@ h2 {
 
 .identity-card,
 .players-card,
+.spectators-card,
+.room-admin-card,
 .chat-card,
 .log-card,
 .rules-card {
@@ -743,6 +786,7 @@ h2 {
 }
 
 .player-list,
+.spectator-list,
 .chat-list,
 .event-log {
   margin: 16px 0 0;
@@ -751,6 +795,11 @@ h2 {
 }
 
 .player-list {
+  display: grid;
+  gap: 7px;
+}
+
+.spectator-list {
   display: grid;
   gap: 7px;
 }
@@ -765,6 +814,23 @@ h2 {
   border: 1px solid transparent;
   border-radius: 10px;
   background: rgba(6, 9, 17, 0.28);
+}
+
+.participant-remove-button {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  color: #e9a0a0;
+  border: 1px solid rgba(229, 120, 120, 0.24);
+  border-radius: 8px;
+  background: rgba(168, 60, 68, 0.08);
+  place-items: center;
+}
+
+.participant-remove-button:hover {
+  border-color: rgba(229, 120, 120, 0.5);
+  background: rgba(168, 60, 68, 0.2);
 }
 
 .player-item.self {
@@ -822,6 +888,43 @@ h2 {
 .player-state.connected {
   background: var(--green);
   box-shadow: 0 0 7px rgba(99, 195, 156, 0.48);
+}
+
+.participant-actions {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.admin-actions {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.admin-actions > .secondary-button,
+.admin-actions > .danger-button {
+  width: 100%;
+}
+
+.admin-actions form {
+  margin: 0;
+}
+
+.admin-actions label {
+  margin-top: 0;
+}
+
+.compact-form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.compact-form-row input,
+.compact-form-row select,
+.compact-form-row button {
+  min-height: 40px;
 }
 
 .phase-card {

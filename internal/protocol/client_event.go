@@ -15,10 +15,12 @@ import (
 var validate = validator.New(validator.WithRequiredStructEnabled())
 
 type ClientEvent struct {
-	Type     room.EventType `json:"type" validate:"required,oneof=ready start_game chat night_action night_pass start_vote vote shoot"`
-	Ready    *bool          `json:"ready,omitempty"`
-	Message  string         `json:"message,omitempty"`
-	TargetID string         `json:"target_id,omitempty"`
+	Type       room.EventType `json:"type" validate:"required,oneof=ready start_game chat night_action night_pass start_vote vote shoot transfer_owner kick_participant set_room_locked set_player_limit return_to_waiting"`
+	Ready      *bool          `json:"ready,omitempty"`
+	Message    string         `json:"message,omitempty"`
+	TargetID   string         `json:"target_id,omitempty"`
+	Locked     *bool          `json:"locked,omitempty"`
+	MaxPlayers *int           `json:"max_players,omitempty"`
 }
 
 func DecodeClientEvent(reader io.Reader) (ClientEvent, error) {
@@ -59,6 +61,12 @@ func (e ClientEvent) RoomEvent(playerID, playerName string) room.Event {
 	if e.Ready != nil {
 		event.Ready = *e.Ready
 	}
+	if e.Locked != nil {
+		event.Locked = *e.Locked
+	}
+	if e.MaxPlayers != nil {
+		event.MaxPlayers = *e.MaxPlayers
+	}
 	return event
 }
 
@@ -68,7 +76,7 @@ func (e ClientEvent) validateShape() error {
 		if e.Ready == nil {
 			return errors.New("ready event requires ready")
 		}
-		return rejectFields(e, false, true, true)
+		return rejectFields(e, false, true, true, true, true)
 	case room.EventChat:
 		if strings.TrimSpace(e.Message) == "" {
 			return errors.New("chat event requires message")
@@ -76,22 +84,37 @@ func (e ClientEvent) validateShape() error {
 		if len([]byte(strings.TrimSpace(e.Message))) > room.MaxChatBytes {
 			return room.ErrMessageTooLong
 		}
-		return rejectFields(e, true, false, true)
+		return rejectFields(e, true, false, true, true, true)
 	case room.EventNightAction, room.EventShoot:
 		if strings.TrimSpace(e.TargetID) == "" {
 			return fmt.Errorf("%s event requires target_id", e.Type)
 		}
-		return rejectFields(e, true, true, false)
+		return rejectFields(e, true, true, false, true, true)
 	case room.EventVote:
-		return rejectFields(e, true, true, false)
-	case room.EventStartGame, room.EventNightPass, room.EventStartVote:
-		return rejectFields(e, true, true, true)
+		return rejectFields(e, true, true, false, true, true)
+	case room.EventTransferOwner, room.EventKickParticipant:
+		if strings.TrimSpace(e.TargetID) == "" {
+			return fmt.Errorf("%s event requires target_id", e.Type)
+		}
+		return rejectFields(e, true, true, false, true, true)
+	case room.EventSetRoomLocked:
+		if e.Locked == nil {
+			return errors.New("set_room_locked event requires locked")
+		}
+		return rejectFields(e, true, true, true, false, true)
+	case room.EventSetPlayerLimit:
+		if e.MaxPlayers == nil {
+			return errors.New("set_player_limit event requires max_players")
+		}
+		return rejectFields(e, true, true, true, true, false)
+	case room.EventStartGame, room.EventNightPass, room.EventStartVote, room.EventReturnToWaiting:
+		return rejectFields(e, true, true, true, true, true)
 	default:
 		return fmt.Errorf("unsupported client event type: %s", e.Type)
 	}
 }
 
-func rejectFields(e ClientEvent, rejectReady, rejectMessage, rejectTarget bool) error {
+func rejectFields(e ClientEvent, rejectReady, rejectMessage, rejectTarget, rejectLocked, rejectMaxPlayers bool) error {
 	if rejectReady && e.Ready != nil {
 		return fmt.Errorf("%s event does not accept ready", e.Type)
 	}
@@ -100,6 +123,12 @@ func rejectFields(e ClientEvent, rejectReady, rejectMessage, rejectTarget bool) 
 	}
 	if rejectTarget && strings.TrimSpace(e.TargetID) != "" {
 		return fmt.Errorf("%s event does not accept target_id", e.Type)
+	}
+	if rejectLocked && e.Locked != nil {
+		return fmt.Errorf("%s event does not accept locked", e.Type)
+	}
+	if rejectMaxPlayers && e.MaxPlayers != nil {
+		return fmt.Errorf("%s event does not accept max_players", e.Type)
 	}
 	return nil
 }

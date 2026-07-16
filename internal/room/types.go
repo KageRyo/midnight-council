@@ -15,17 +15,22 @@ const (
 type EventType string
 
 const (
-	EventJoin         EventType = "join"
-	EventLeave        EventType = "leave"
-	EventReady        EventType = "ready"
-	EventStartGame    EventType = "start_game"
-	EventChat         EventType = "chat"
-	EventNightAction  EventType = "night_action"
-	EventNightPass    EventType = "night_pass"
-	EventStartVote    EventType = "start_vote"
-	EventVote         EventType = "vote"
-	EventShoot        EventType = "shoot"
-	EventPhaseTimeout EventType = "phase_timeout"
+	EventJoin            EventType = "join"
+	EventLeave           EventType = "leave"
+	EventReady           EventType = "ready"
+	EventStartGame       EventType = "start_game"
+	EventChat            EventType = "chat"
+	EventNightAction     EventType = "night_action"
+	EventNightPass       EventType = "night_pass"
+	EventStartVote       EventType = "start_vote"
+	EventVote            EventType = "vote"
+	EventShoot           EventType = "shoot"
+	EventTransferOwner   EventType = "transfer_owner"
+	EventKickParticipant EventType = "kick_participant"
+	EventSetRoomLocked   EventType = "set_room_locked"
+	EventSetPlayerLimit  EventType = "set_player_limit"
+	EventReturnToWaiting EventType = "return_to_waiting"
+	EventPhaseTimeout    EventType = "phase_timeout"
 )
 
 type Role string
@@ -75,7 +80,10 @@ type Event struct {
 	PlayerID       string
 	PlayerName     string
 	ReconnectToken string
+	Spectator      bool
 	Ready          bool
+	Locked         bool
+	MaxPlayers     int
 	Message        string
 	TargetID       string
 	At             time.Time
@@ -93,6 +101,14 @@ type Player struct {
 	JoinedAt       time.Time
 }
 
+type Spectator struct {
+	ID             string
+	Name           string
+	ReconnectToken string
+	Connected      bool
+	JoinedAt       time.Time
+}
+
 type PlayerView struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
@@ -103,23 +119,33 @@ type PlayerView struct {
 	Role      Role   `json:"role,omitempty"`
 }
 
+type SpectatorView struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	Connected bool   `json:"connected"`
+}
+
 type Snapshot struct {
-	RoomID         string       `json:"room_id"`
-	OwnerID        string       `json:"owner_id"`
-	Phase          Phase        `json:"phase"`
-	PhaseStartedAt time.Time    `json:"phase_started_at"`
-	PhaseDeadline  *time.Time   `json:"phase_deadline,omitempty"`
-	Round          int          `json:"round"`
-	Players        []PlayerView `json:"players"`
-	Result         *GameResult  `json:"result,omitempty"`
-	Log            []LogEntry   `json:"log,omitempty"`
-	UpdatedAt      time.Time    `json:"updated_at"`
-	ServerTime     time.Time    `json:"server_time"`
+	RoomID         string          `json:"room_id"`
+	OwnerID        string          `json:"owner_id"`
+	Phase          Phase           `json:"phase"`
+	PhaseStartedAt time.Time       `json:"phase_started_at"`
+	PhaseDeadline  *time.Time      `json:"phase_deadline,omitempty"`
+	Round          int             `json:"round"`
+	Players        []PlayerView    `json:"players"`
+	Spectators     []SpectatorView `json:"spectators,omitempty"`
+	Locked         bool            `json:"locked"`
+	MaxPlayers     int             `json:"max_players"`
+	Result         *GameResult     `json:"result,omitempty"`
+	Log            []LogEntry      `json:"log,omitempty"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+	ServerTime     time.Time       `json:"server_time"`
 }
 
 type PrivatePlayerView struct {
 	PlayerID       string                `json:"player_id"`
 	ReconnectToken string                `json:"reconnect_token,omitempty"`
+	Spectator      bool                  `json:"spectator"`
 	Role           Role                  `json:"role,omitempty"`
 	Alive          bool                  `json:"alive"`
 	ActionRequired bool                  `json:"action_required"`
