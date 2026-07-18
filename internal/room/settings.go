@@ -9,6 +9,7 @@ const (
 	GamePresetStandard GamePreset = "STANDARD"
 	GamePresetQuick    GamePreset = "QUICK"
 	GamePresetBeginner GamePreset = "BEGINNER"
+	GamePresetAdvanced GamePreset = "ADVANCED"
 	GamePresetMinimal  GamePreset = "MINIMAL"
 	GamePresetCustom   GamePreset = "CUSTOM"
 
@@ -31,6 +32,7 @@ type RoleConfiguration struct {
 	Killers    int `json:"killers"`
 	Detectives int `json:"detectives"`
 	Doctors    int `json:"doctors"`
+	Escorts    int `json:"escorts"`
 	Shooters   int `json:"shooters"`
 }
 
@@ -94,6 +96,21 @@ func GameSettingsForPreset(preset GamePreset, standardDurations PhaseDurations) 
 				Shooters:   1,
 			},
 		}, nil
+	case GamePresetAdvanced:
+		return GameSettings{
+			Preset:                GamePresetAdvanced,
+			NightDuration:         "1m30s",
+			DayDiscussionDuration: "4m",
+			DayVotingDuration:     "1m",
+			MinimumPlayers:        6,
+			Roles: RoleConfiguration{
+				Killers:    1,
+				Detectives: 1,
+				Doctors:    1,
+				Escorts:    1,
+				Shooters:   1,
+			},
+		}, nil
 	case GamePresetMinimal:
 		return GameSettings{
 			Preset:                GamePresetMinimal,
@@ -111,11 +128,12 @@ func GameSettingsForPreset(preset GamePreset, standardDurations PhaseDurations) 
 }
 
 func GamePresetCatalog(standardDurations PhaseDurations) []GameSettings {
-	presets := make([]GameSettings, 0, 4)
+	presets := make([]GameSettings, 0, 5)
 	for _, preset := range []GamePreset{
 		GamePresetStandard,
 		GamePresetQuick,
 		GamePresetBeginner,
+		GamePresetAdvanced,
 		GamePresetMinimal,
 	} {
 		settings, err := GameSettingsForPreset(preset, standardDurations)
@@ -128,6 +146,13 @@ func GamePresetCatalog(standardDurations PhaseDurations) []GameSettings {
 }
 
 func (s GameSettings) Validate(maxPlayers int) (PhaseDurations, error) {
+	return s.ValidateWithRuleSet(maxPlayers, DefaultRuleSet())
+}
+
+func (s GameSettings) ValidateWithRuleSet(maxPlayers int, rules *RuleSet) (PhaseDurations, error) {
+	if rules == nil {
+		return PhaseDurations{}, ErrInvalidRuleSet
+	}
 	durations, err := s.phaseDurations()
 	if err != nil {
 		return PhaseDurations{}, err
@@ -141,37 +166,41 @@ func (s GameSettings) Validate(maxPlayers int) (PhaseDurations, error) {
 			return PhaseDurations{}, ErrInvalidPhaseDuration
 		}
 	}
-	if err := s.validateRoomConstraints(maxPlayers); err != nil {
+	if err := s.validateRoomConstraints(maxPlayers, rules); err != nil {
 		return PhaseDurations{}, err
 	}
 	return durations, nil
 }
 
 func (s GameSettings) ValidateForStart(maxPlayers int, standardDurations PhaseDurations) (PhaseDurations, error) {
+	return s.ValidateForStartWithRuleSet(maxPlayers, standardDurations, DefaultRuleSet())
+}
+
+func (s GameSettings) ValidateForStartWithRuleSet(maxPlayers int, standardDurations PhaseDurations, rules *RuleSet) (PhaseDurations, error) {
+	if rules == nil {
+		return PhaseDurations{}, ErrInvalidRuleSet
+	}
 	if s != StandardGameSettings(standardDurations) {
-		return s.Validate(maxPlayers)
+		return s.ValidateWithRuleSet(maxPlayers, rules)
 	}
 	durations, err := s.phaseDurations()
 	if err != nil {
 		return PhaseDurations{}, err
 	}
-	if err := s.validateRoomConstraints(maxPlayers); err != nil {
+	if err := s.validateRoomConstraints(maxPlayers, rules); err != nil {
 		return PhaseDurations{}, err
 	}
 	return durations, nil
 }
 
-func (s GameSettings) validateRoomConstraints(maxPlayers int) error {
+func (s GameSettings) validateRoomConstraints(maxPlayers int, rules *RuleSet) error {
 	if s.MinimumPlayers < MinPlayersToStart || s.MinimumPlayers > MaxPlayersAllowed {
 		return ErrMinimumPlayersOutOfRange
 	}
 	if s.MinimumPlayers > maxPlayers {
 		return ErrMinimumPlayersAboveLimit
 	}
-	if s.Roles.Killers != 1 ||
-		s.Roles.Detectives < 0 || s.Roles.Detectives > 1 ||
-		s.Roles.Doctors < 0 || s.Roles.Doctors > 1 ||
-		s.Roles.Shooters < 0 || s.Roles.Shooters > 1 {
+	if err := rules.ValidateRoleConfiguration(s.Roles); err != nil {
 		return ErrInvalidRoleConfiguration
 	}
 	return nil
@@ -202,22 +231,5 @@ func (s GameSettings) phaseDurations() (PhaseDurations, error) {
 }
 
 func roleDeckForSettings(playerCount int, roles RoleConfiguration) []Role {
-	deck := make([]Role, 0, playerCount)
-	deck = append(deck, RoleKiller)
-	for _, candidate := range []struct {
-		enabled bool
-		role    Role
-	}{
-		{enabled: roles.Detectives == 1, role: RoleDetective},
-		{enabled: roles.Doctors == 1, role: RoleDoctor},
-		{enabled: roles.Shooters == 1, role: RoleShooter},
-	} {
-		if candidate.enabled && len(deck) < playerCount-1 {
-			deck = append(deck, candidate.role)
-		}
-	}
-	for len(deck) < playerCount {
-		deck = append(deck, RoleVillager)
-	}
-	return deck
+	return DefaultRuleSet().RoleDeck(playerCount, roles)
 }

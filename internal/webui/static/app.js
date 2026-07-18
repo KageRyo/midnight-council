@@ -12,6 +12,7 @@
     STANDARD: "標準",
     QUICK: "快速",
     BEGINNER: "新手",
+    ADVANCED: "進階",
     MINIMAL: "極簡",
     CUSTOM: "自訂",
   };
@@ -36,6 +37,11 @@
       name: "醫生",
       symbol: "✚",
       description: "每晚保護一名玩家，也可以選擇保護自己。",
+    },
+    ESCORT: {
+      name: "阻擋者",
+      symbol: "⊘",
+      description: "每晚阻擋一名玩家，使該玩家當晚提交的角色行動失效。",
     },
     SHOOTER: {
       name: "槍手",
@@ -168,6 +174,7 @@
       "setting-killers",
       "setting-detective",
       "setting-doctor",
+      "setting-escort",
       "setting-shooter",
       "setting-reveal-roles",
       "game-settings-submit",
@@ -753,6 +760,7 @@
       killers,
       detectives: ui.settingDetective.checked ? 1 : 0,
       doctors: ui.settingDoctor.checked ? 1 : 0,
+      escorts: ui.settingEscort.checked ? 1 : 0,
       shooters: ui.settingShooter.checked ? 1 : 0,
     });
   }
@@ -974,6 +982,7 @@
     const enabledRoles = [`殺手 ×${settings.roles?.killers || 0}`];
     if (settings.roles?.detectives) enabledRoles.push("偵探");
     if (settings.roles?.doctors) enabledRoles.push("醫生");
+    if (settings.roles?.escorts) enabledRoles.push("阻擋者");
     if (settings.roles?.shooters) enabledRoles.push("槍手");
     enabledRoles.push("其餘為平民");
     ui.gameSettingsSummary.replaceChildren(
@@ -1019,6 +1028,7 @@
     ui.settingKillers.value = String(settings.roles?.killers || 1);
     ui.settingDetective.checked = settings.roles?.detectives === 1;
     ui.settingDoctor.checked = settings.roles?.doctors === 1;
+    ui.settingEscort.checked = settings.roles?.escorts === 1;
     ui.settingShooter.checked = settings.roles?.shooters === 1;
     ui.settingRevealRoles.checked = settings.reveal_roles_on_death === true;
   }
@@ -1038,6 +1048,7 @@
       ui.settingKillers,
       ui.settingDetective,
       ui.settingDoctor,
+      ui.settingEscort,
       ui.settingShooter,
       ui.settingRevealRoles,
     ]) {
@@ -1143,6 +1154,7 @@
         KILLER: ["選擇刺殺目標", "執行刺殺"],
         DETECTIVE: ["選擇查驗目標", "進行查驗"],
         DOCTOR: ["選擇保護目標", "進行保護"],
+        ESCORT: ["選擇阻擋目標", "執行阻擋"],
       }[role] || ["選擇夜間目標", "確認行動"];
       ui.nightTargetLabel.textContent = action[0];
       ui.nightActionButton.textContent = action[1];

@@ -31,6 +31,7 @@ type ClientEvent struct {
 	Killers               *int            `json:"killers,omitempty"`
 	Detectives            *int            `json:"detectives,omitempty"`
 	Doctors               *int            `json:"doctors,omitempty"`
+	Escorts               *int            `json:"escorts,omitempty"`
 	Shooters              *int            `json:"shooters,omitempty"`
 	AFK                   *bool           `json:"afk,omitempty"`
 }
@@ -95,6 +96,7 @@ func (e ClientEvent) RoomEvent(playerID, playerName string) room.Event {
 			Killers:    intValue(e.Killers),
 			Detectives: intValue(e.Detectives),
 			Doctors:    intValue(e.Doctors),
+			Escorts:    intValue(e.Escorts),
 			Shooters:   intValue(e.Shooters),
 		},
 	}
@@ -143,7 +145,7 @@ func (e ClientEvent) validateShape() error {
 			return errors.New("set_game_preset event requires preset")
 		}
 		switch e.Preset {
-		case room.GamePresetStandard, room.GamePresetQuick, room.GamePresetBeginner, room.GamePresetMinimal:
+		case room.GamePresetStandard, room.GamePresetQuick, room.GamePresetBeginner, room.GamePresetAdvanced, room.GamePresetMinimal:
 		default:
 			return room.ErrInvalidGamePreset
 		}
@@ -157,6 +159,7 @@ func (e ClientEvent) validateShape() error {
 			e.Killers == nil ||
 			e.Detectives == nil ||
 			e.Doctors == nil ||
+			e.Escorts == nil ||
 			e.Shooters == nil {
 			return errors.New("set_game_settings event requires all game setting fields")
 		}
@@ -170,6 +173,7 @@ func (e ClientEvent) validateShape() error {
 			fieldKillers,
 			fieldDetectives,
 			fieldDoctors,
+			fieldEscorts,
 			fieldShooters,
 		)
 	case room.EventPresence:
@@ -201,6 +205,7 @@ const (
 	fieldKillers               clientField = "killers"
 	fieldDetectives            clientField = "detectives"
 	fieldDoctors               clientField = "doctors"
+	fieldEscorts               clientField = "escorts"
 	fieldShooters              clientField = "shooters"
 	fieldSequence              clientField = "sequence"
 	fieldAFK                   clientField = "afk"
@@ -230,6 +235,7 @@ func rejectUnexpectedFields(e ClientEvent, allowedFields ...clientField) error {
 		{field: fieldKillers, present: e.Killers != nil},
 		{field: fieldDetectives, present: e.Detectives != nil},
 		{field: fieldDoctors, present: e.Doctors != nil},
+		{field: fieldEscorts, present: e.Escorts != nil},
 		{field: fieldShooters, present: e.Shooters != nil},
 		{field: fieldSequence, present: e.Sequence != nil},
 		{field: fieldAFK, present: e.AFK != nil},

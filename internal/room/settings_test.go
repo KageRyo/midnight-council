@@ -51,6 +51,14 @@ func TestGameSettingsValidateRejectsIllegalAndUnbalancedConfigurations(t *testin
 			wantError: ErrInvalidRoleConfiguration,
 		},
 		{
+			name: "duplicate escort role",
+			mutate: func(settings *GameSettings) {
+				settings.Roles.Escorts = 2
+			},
+			max:       DefaultMaxPlayers,
+			wantError: ErrInvalidRoleConfiguration,
+		},
+		{
 			name: "multiple killers are unsupported",
 			mutate: func(settings *GameSettings) {
 				settings.Roles.Killers = 2
@@ -78,8 +86,8 @@ func TestGamePresetCatalogContainsServerAuthoritativePresets(t *testing.T) {
 		DayVoting:     50 * time.Second,
 	}
 	catalog := GamePresetCatalog(base)
-	if len(catalog) != 4 {
-		t.Fatalf("preset count = %d, want 4", len(catalog))
+	if len(catalog) != 5 {
+		t.Fatalf("preset count = %d, want 5", len(catalog))
 	}
 	if catalog[0].Preset != GamePresetStandard ||
 		catalog[0].NightDuration != "1m15s" ||
@@ -91,6 +99,10 @@ func TestGamePresetCatalogContainsServerAuthoritativePresets(t *testing.T) {
 		if _, err := settings.Validate(DefaultMaxPlayers); err != nil {
 			t.Fatalf("preset %s is invalid: %v", settings.Preset, err)
 		}
+	}
+	advanced := catalog[3]
+	if advanced.Preset != GamePresetAdvanced || advanced.MinimumPlayers != 6 || advanced.Roles.Escorts != 1 {
+		t.Fatalf("advanced preset = %#v", advanced)
 	}
 }
 
@@ -138,6 +150,23 @@ func TestRoleDeckReservesVillagerAndActivatesSpecialRolesInOrder(t *testing.T) {
 			if got[index] != test.want[index] {
 				t.Fatalf("%d-player deck = %#v, want %#v", test.players, got, test.want)
 			}
+		}
+	}
+}
+
+func TestAdvancedRoleDeckIncludesEscortBeforeShooter(t *testing.T) {
+	roles := RoleConfiguration{
+		Killers:    1,
+		Detectives: 1,
+		Doctors:    1,
+		Escorts:    1,
+		Shooters:   1,
+	}
+	want := []Role{RoleKiller, RoleDetective, RoleDoctor, RoleEscort, RoleShooter, RoleVillager}
+	got := roleDeckForSettings(6, roles)
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("advanced deck = %#v, want %#v", got, want)
 		}
 	}
 }

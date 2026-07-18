@@ -611,6 +611,17 @@ func TestHandlerSupportsServerValidatedGameSettings(t *testing.T) {
 	})
 
 	writeClientEvent(t, clients[0], map[string]any{
+		"type":   "set_game_preset",
+		"preset": "ADVANCED",
+	})
+	advancedState := readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.GameSettings.Preset == room.GamePresetAdvanced
+	})
+	if advancedState.State.GameSettings.MinimumPlayers != 6 || advancedState.State.GameSettings.Roles.Escorts != 1 {
+		t.Fatalf("advanced settings = %#v", advancedState.State.GameSettings)
+	}
+
+	writeClientEvent(t, clients[0], map[string]any{
 		"type":                    "set_game_settings",
 		"night_duration":          "30s",
 		"day_discussion_duration": "40s",
@@ -620,6 +631,7 @@ func TestHandlerSupportsServerValidatedGameSettings(t *testing.T) {
 		"killers":                 1,
 		"detectives":              0,
 		"doctors":                 0,
+		"escorts":                 0,
 		"shooters":                0,
 	})
 	settingsState := readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
@@ -640,6 +652,7 @@ func TestHandlerSupportsServerValidatedGameSettings(t *testing.T) {
 		"killers":                 2,
 		"detectives":              0,
 		"doctors":                 0,
+		"escorts":                 0,
 		"shooters":                0,
 	})
 	readEnvelopeUntil(t, clients[0], func(envelope wireEnvelope) bool {

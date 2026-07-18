@@ -130,13 +130,15 @@ Default durations are 90 seconds for night, five minutes for discussion, and 60 
 
 Roles are shuffled using `crypto/rand`. Reconnect tokens and subscription IDs also use cryptographically secure randomness.
 
+Role capabilities live in `internal/room/rules.go` as a rule-set registry. Each role definition owns its faction, optional night action, action priority, self-target policy, and optional day ability. State validation, private action availability, deck construction, investigation alignment, ordered night resolution, and win counts all read this registry instead of maintaining separate role switches. `Hub` accepts an alternate validated rule set for future modes. The default order is escort block, doctor protect, killer attack, then detective investigate; equal-priority actions use player ID only as a deterministic tie-breaker.
+
 ## Game Settings
 
-Every room owns a public `game_settings` value and a server-defined `game_presets` catalog. The built-in presets are `STANDARD`, `QUICK`, `BEGINNER`, and `MINIMAL`; arbitrary client-supplied preset definitions are not trusted. Owners may apply a preset or submit a complete custom configuration only in `WAITING` or `FINISHED`.
+Every room owns a public `game_settings` value and a server-defined `game_presets` catalog. The built-in presets are `STANDARD`, `QUICK`, `BEGINNER`, `ADVANCED`, and `MINIMAL`; arbitrary client-supplied preset definitions are not trusted. Owners may apply a preset or submit a complete custom configuration only in `WAITING` or `FINISHED`.
 
 Settings contain the three phase durations, minimum player count, whether eliminated roles become public immediately, and role counts. Custom durations must be valid Go duration strings between one second and one hour. Minimum players must be from 2 through 20 and cannot exceed the room's player cap; conversely, the cap cannot be lowered below the configured minimum.
 
-The current rules engine requires exactly one killer and permits zero or one detective, doctor, and shooter. This constraint prevents the configuration UI from exposing role combinations whose team knowledge or night resolution is not implemented yet. At start, enabled special roles are added in killer, detective, doctor, shooter order while reserving at least one seat for a villager; every remaining seat becomes a villager. The server validates the full configuration again before accepting it.
+The current rules engine requires exactly one killer and permits zero or one detective, doctor, escort, and shooter. This constraint prevents the configuration UI from exposing role combinations whose team knowledge or night resolution is not implemented yet. At start, enabled special roles are added in killer, detective, doctor, escort, shooter order while reserving at least one seat for a villager; every remaining seat becomes a villager. The server validates the full configuration again before accepting it.
 
 Changing settings clears every non-owner readiness flag so players must acknowledge the new rules before start. The selected settings and preset survive return-to-waiting resets and rematches. When `reveal_roles_on_death` is enabled, only eliminated players' roles enter the public projection during an active game; living roles remain private and all roles are still revealed at settlement.
 

@@ -64,6 +64,7 @@ type State struct {
 	phaseDeadline  time.Time
 	baseDurations  PhaseDurations
 	phaseDurations PhaseDurations
+	rules          *RuleSet
 	gameSettings   GameSettings
 	ownerID        string
 	players        map[string]*Player
@@ -83,9 +84,20 @@ func NewState(roomID string) *State {
 	return newState(roomID, DefaultPhaseDurations())
 }
 
+func NewStateWithRuleSet(roomID string, rules *RuleSet) *State {
+	return newStateWithRuleSet(roomID, DefaultPhaseDurations(), rules)
+}
+
 func newState(roomID string, phaseDurations PhaseDurations) *State {
+	return newStateWithRuleSet(roomID, phaseDurations, DefaultRuleSet())
+}
+
+func newStateWithRuleSet(roomID string, phaseDurations PhaseDurations, rules *RuleSet) *State {
 	if err := phaseDurations.Validate(); err != nil {
 		panic(err)
+	}
+	if rules == nil {
+		panic(ErrInvalidRuleSet)
 	}
 	now := time.Now().UTC()
 	return &State{
@@ -94,6 +106,7 @@ func newState(roomID string, phaseDurations PhaseDurations) *State {
 		phaseStartedAt: now,
 		baseDurations:  phaseDurations,
 		phaseDurations: phaseDurations,
+		rules:          rules,
 		gameSettings:   StandardGameSettings(phaseDurations),
 		players:        make(map[string]*Player),
 		spectators:     make(map[string]*Spectator),
@@ -277,7 +290,7 @@ func (s *State) PrivateView(playerID string) *PrivatePlayerView {
 		view.Role = player.Role
 	}
 
-	if s.phase == PhaseNight && player.Alive && hasNightAction(player.Role) {
+	if _, hasNightAction := s.gameRules().NightActionForRole(player.Role); s.phase == PhaseNight && player.Alive && hasNightAction {
 		view.ActionRequired = !s.nightActionSubmitted(player.ID)
 		view.Available = append(view.Available, EventNightAction, EventNightPass)
 	}
@@ -288,7 +301,7 @@ func (s *State) PrivateView(playerID string) *PrivatePlayerView {
 		view.Available = append(view.Available, EventVote)
 	}
 
-	if isDayPhase(s.phase) && player.Alive && player.Role == RoleShooter && !player.ShooterUsed {
+	if isDayPhase(s.phase) && player.Alive && s.gameRules().CanShoot(player.Role) && !player.ShooterUsed {
 		view.CanShoot = true
 		view.Available = append(view.Available, EventShoot)
 	}
@@ -502,7 +515,7 @@ func (s *State) applyStartGame(event Event) (*Envelope, error) {
 	if event.PlayerID != s.ownerID {
 		return nil, ErrOwnerOnly
 	}
-	durations, err := s.gameSettings.ValidateForStart(s.maxPlayers, s.baseDurations)
+	durations, err := s.gameSettings.ValidateForStartWithRuleSet(s.maxPlayers, s.baseDurations, s.gameRules())
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +526,7 @@ func (s *State) applyStartGame(event Event) (*Envelope, error) {
 		return nil, ErrPlayersNotReady
 	}
 
-	roles := roleDeckForSettings(len(s.players), s.gameSettings.Roles)
+	roles := s.gameRules().RoleDeck(len(s.players), s.gameSettings.Roles)
 	if err := shuffleRoles(roles); err != nil {
 		return nil, err
 	}
@@ -590,9 +603,9 @@ func (s *State) applyNightAction(event Event) (*Envelope, error) {
 		return nil, err
 	}
 
-	actionType, err := nightActionForRole(player.Role)
-	if err != nil {
-		return nil, err
+	actionRule, ok := s.gameRules().NightActionForRole(player.Role)
+	if !ok {
+		return nil, ErrRoleHasNoNightAction
 	}
 
 	target, err := s.livingTarget(event.TargetID)
@@ -600,19 +613,14 @@ func (s *State) applyNightAction(event Event) (*Envelope, error) {
 		return nil, err
 	}
 
-	switch actionType {
-	case NightActionKill, NightActionInvestigate:
-		if target.ID == player.ID {
-			return nil, ErrSelfTargetNotAllowed
-		}
-	case NightActionProtect:
-		// Doctors may protect themselves in this prototype.
+	if target.ID == player.ID && !actionRule.AllowSelfTarget {
+		return nil, ErrSelfTargetNotAllowed
 	}
 
 	s.nightActions[player.ID] = NightAction{
 		PlayerID: player.ID,
 		TargetID: target.ID,
-		Type:     actionType,
+		Type:     actionRule.Type,
 	}
 
 	if s.allNightActionsSubmitted() {
@@ -632,7 +640,7 @@ func (s *State) applyNightPass(event Event) (*Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !hasNightAction(player.Role) {
+	if _, ok := s.gameRules().NightActionForRole(player.Role); !ok {
 		return nil, ErrRoleHasNoNightAction
 	}
 
@@ -697,7 +705,7 @@ func (s *State) applyShoot(event Event) (*Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	if shooter.Role != RoleShooter {
+	if !s.gameRules().CanShoot(shooter.Role) {
 		return nil, ErrShooterOnly
 	}
 	if shooter.ShooterUsed {
@@ -819,7 +827,7 @@ func (s *State) applySetGameSettings(event Event) (*Envelope, error) {
 
 	settings := event.GameSettings
 	settings.Preset = GamePresetCustom
-	durations, err := settings.Validate(s.maxPlayers)
+	durations, err := settings.ValidateWithRuleSet(s.maxPlayers, s.gameRules())
 	if err != nil {
 		return nil, err
 	}
@@ -843,7 +851,7 @@ func (s *State) applySetGamePreset(event Event) (*Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	durations, err := settings.ValidateForStart(s.maxPlayers, s.baseDurations)
+	durations, err := settings.ValidateForStartWithRuleSet(s.maxPlayers, s.baseDurations, s.gameRules())
 	if err != nil {
 		return nil, err
 	}
@@ -904,7 +912,7 @@ func (s *State) applyPhaseTimeout(event Event) (*Envelope, error) {
 	switch expiredPhase {
 	case PhaseNight:
 		for _, player := range s.players {
-			if player.Alive && hasNightAction(player.Role) && !s.nightActionSubmitted(player.ID) {
+			if _, hasNightAction := s.gameRules().NightActionForRole(player.Role); player.Alive && hasNightAction && !s.nightActionSubmitted(player.ID) {
 				s.nightActions[player.ID] = NightAction{
 					PlayerID: player.ID,
 					Type:     NightActionPass,
@@ -932,16 +940,22 @@ func (s *State) applyPhaseTimeout(event Event) (*Envelope, error) {
 }
 
 func (s *State) resolveNight(at time.Time) {
+	blocked := make(map[string]bool)
 	protected := make(map[string]bool)
-	for _, action := range s.sortedNightActions() {
-		if action.Type == NightActionProtect {
-			protected[action.TargetID] = true
-		}
-	}
-
 	eliminated := make(map[string]bool)
-	for _, action := range s.sortedNightActions() {
+	for _, action := range s.gameRules().OrderNightActions(s.nightActions) {
+		if blocked[action.PlayerID] {
+			continue
+		}
 		switch action.Type {
+		case NightActionBlock:
+			if action.TargetID != "" {
+				blocked[action.TargetID] = true
+			}
+		case NightActionProtect:
+			if action.TargetID != "" {
+				protected[action.TargetID] = true
+			}
 		case NightActionKill:
 			if action.TargetID != "" && !protected[action.TargetID] {
 				if target, ok := s.players[action.TargetID]; ok && target.Alive {
@@ -1017,7 +1031,7 @@ func (s *State) recordInvestigation(action NightAction) {
 		Round:      s.round,
 		TargetID:   target.ID,
 		TargetName: target.Name,
-		Killer:     target.Role == RoleKiller,
+		Killer:     s.gameRules().IsKillerAligned(target.Role),
 	})
 }
 
@@ -1032,7 +1046,7 @@ func (s *State) checkWin(at time.Time) bool {
 		if !player.Alive {
 			continue
 		}
-		if player.Role == RoleKiller {
+		if s.gameRules().IsKillerAligned(player.Role) {
 			killers++
 		} else {
 			others++
@@ -1127,7 +1141,7 @@ func (s *State) livingTarget(targetID string) (*Player, error) {
 
 func (s *State) allNightActionsSubmitted() bool {
 	for _, player := range s.players {
-		if player.Alive && hasNightAction(player.Role) && !s.nightActionSubmitted(player.ID) {
+		if _, hasNightAction := s.gameRules().NightActionForRole(player.Role); player.Alive && hasNightAction && !s.nightActionSubmitted(player.ID) {
 			return false
 		}
 	}
@@ -1177,17 +1191,6 @@ func (s *State) sortedPlayerIDs() []string {
 	}
 	sort.Strings(ids)
 	return ids
-}
-
-func (s *State) sortedNightActions() []NightAction {
-	actions := make([]NightAction, 0, len(s.nightActions))
-	for _, action := range s.nightActions {
-		actions = append(actions, action)
-	}
-	sort.Slice(actions, func(i, j int) bool {
-		return actions[i].PlayerID < actions[j].PlayerID
-	})
-	return actions
 }
 
 func (s *State) appendLog(logType LogType, at time.Time, entry LogEntry) {
@@ -1249,39 +1252,15 @@ func stateEnvelope(snapshot Snapshot) *Envelope {
 	}
 }
 
-func hasNightAction(role Role) bool {
-	switch role {
-	case RoleKiller, RoleDetective, RoleDoctor:
-		return true
-	default:
-		return false
+func (s *State) gameRules() *RuleSet {
+	if s.rules != nil {
+		return s.rules
 	}
-}
-
-func nightActionForRole(role Role) (NightActionType, error) {
-	switch role {
-	case RoleKiller:
-		return NightActionKill, nil
-	case RoleDetective:
-		return NightActionInvestigate, nil
-	case RoleDoctor:
-		return NightActionProtect, nil
-	default:
-		return "", ErrRoleHasNoNightAction
-	}
+	return DefaultRuleSet()
 }
 
 func isDayPhase(phase Phase) bool {
 	return phase == PhaseDayDiscussion || phase == PhaseDayVoting
-}
-
-func roleDeck(playerCount int) []Role {
-	return roleDeckForSettings(playerCount, RoleConfiguration{
-		Killers:    1,
-		Detectives: 1,
-		Doctors:    1,
-		Shooters:   1,
-	})
 }
 
 func shuffleRoles(roles []Role) error {

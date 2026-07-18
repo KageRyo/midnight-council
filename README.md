@@ -11,11 +11,12 @@ The Go server and its embedded web client already support a repeatable playable 
 - Room actor per room
 - Server-authoritative game state
 - Public room snapshots plus per-player private state
-- Five prototype roles:
+- Six prototype roles:
   - `VILLAGER`
   - `KILLER`
   - `DETECTIVE`
   - `DOCTOR`
+  - `ESCORT`
   - `SHOOTER`
 - Day/night state machine
 - Server-authoritative phase deadlines and automatic progression
@@ -32,7 +33,7 @@ The Go server and its embedded web client already support a repeatable playable 
 - Owner transfer, kick, room lock, and configurable player cap
 - Return-to-waiting reset and same-room rematches
 - Room-owned phase timing, minimum players, role pool, and death-reveal settings
-- Server-authoritative standard, quick, beginner, and minimal rule presets
+- Server-authoritative standard, quick, beginner, advanced, and minimal rule presets
 - Server validation for duration bounds, player-cap compatibility, and legal role balance
 - Room idle timeout and hub cleanup
 - Public event log for game flow
@@ -207,6 +208,7 @@ The server broadcasts envelopes:
         "killers": 1,
         "detectives": 1,
         "doctors": 1,
+        "escorts": 0,
         "shooters": 1
       }
     }
@@ -327,6 +329,7 @@ Set complete custom game settings:
   "killers": 1,
   "detectives": 1,
   "doctors": 1,
+  "escorts": 0,
   "shooters": 0
 }
 ```
@@ -337,8 +340,8 @@ Set complete custom game settings:
 2. Non-owner players send `ready`.
 3. The owner selects a preset or custom rules, then sends `start_game` after the configured minimum player count and readiness requirements are met.
 4. The server shuffles roles and enters `NIGHT`.
-5. Alive `KILLER`, `DETECTIVE`, and `DOCTOR` players submit `night_action` or `night_pass`; missing actions become passes when the night deadline expires.
-6. The server resolves protection, kills, and detective results when every required action is present or time expires.
+5. Alive `KILLER`, `DETECTIVE`, `DOCTOR`, and enabled `ESCORT` players submit `night_action` or `night_pass`; missing actions become passes when the night deadline expires.
+6. The server resolves role actions in rule-defined order: escort blocks, doctor protection, killer attacks, then detective results.
 7. If no side has won, the room enters `DAY_DISCUSSION`.
 8. The owner sends `start_vote`, or the discussion deadline starts voting automatically.
 9. Alive players vote. The server resolves execution when everyone has voted; missing votes become abstentions at the voting deadline.

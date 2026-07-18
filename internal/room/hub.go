@@ -14,6 +14,7 @@ type Hub struct {
 	rooms          map[string]*Actor
 	idleTimeout    time.Duration
 	phaseDurations PhaseDurations
+	ruleSet        *RuleSet
 }
 
 type HubOption func(*Hub)
@@ -30,17 +31,27 @@ func WithPhaseDurations(durations PhaseDurations) HubOption {
 	}
 }
 
+func WithRuleSet(rules *RuleSet) HubOption {
+	return func(h *Hub) {
+		h.ruleSet = rules
+	}
+}
+
 func NewHub(options ...HubOption) *Hub {
 	hub := &Hub{
 		rooms:          make(map[string]*Actor),
 		idleTimeout:    DefaultRoomIdleTimeout,
 		phaseDurations: DefaultPhaseDurations(),
+		ruleSet:        DefaultRuleSet(),
 	}
 	for _, option := range options {
 		option(hub)
 	}
 	if err := hub.phaseDurations.Validate(); err != nil {
 		panic(err)
+	}
+	if hub.ruleSet == nil {
+		panic(ErrInvalidRuleSet)
 	}
 	return hub
 }
@@ -56,7 +67,7 @@ func (h *Hub) GetOrCreate(roomID string) *Actor {
 		delete(h.rooms, roomID)
 	}
 
-	actor := newActor(roomID, h.idleTimeout, h.phaseDurations, func(actor *Actor) {
+	actor := newActorWithRuleSet(roomID, h.idleTimeout, h.phaseDurations, h.ruleSet, func(actor *Actor) {
 		h.remove(roomID, actor)
 	})
 	h.rooms[roomID] = actor

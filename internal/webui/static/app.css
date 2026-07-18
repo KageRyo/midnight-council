@@ -732,6 +732,11 @@ h2 {
   border-color: rgba(99, 195, 156, 0.36);
 }
 
+.role-sigil[data-role="ESCORT"] {
+  color: #d5b0ef;
+  border-color: rgba(184, 132, 218, 0.38);
+}
+
 .role-sigil[data-role="SHOOTER"] {
   color: var(--gold-bright);
   border-color: rgba(232, 187, 104, 0.38);

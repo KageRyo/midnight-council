@@ -143,6 +143,7 @@ func TestDecodeClientEventMapsGameSettings(t *testing.T) {
 		"killers":1,
 		"detectives":1,
 		"doctors":0,
+		"escorts":1,
 		"shooters":1
 	}`))
 	if err != nil {
@@ -157,7 +158,7 @@ func TestDecodeClientEventMapsGameSettings(t *testing.T) {
 		settings.DayVotingDuration != "30s" ||
 		settings.MinimumPlayers != 4 ||
 		!settings.RevealRolesOnDeath ||
-		settings.Roles != (room.RoleConfiguration{Killers: 1, Detectives: 1, Shooters: 1}) {
+		settings.Roles != (room.RoleConfiguration{Killers: 1, Detectives: 1, Escorts: 1, Shooters: 1}) {
 		t.Fatalf("room settings event = %#v", roomEvent)
 	}
 }
@@ -170,6 +171,16 @@ func TestDecodeClientEventMapsGamePreset(t *testing.T) {
 	roomEvent := event.RoomEvent("owner", "Owner")
 	if roomEvent.Type != room.EventSetGamePreset || roomEvent.GamePreset != room.GamePresetQuick {
 		t.Fatalf("room preset event = %#v", roomEvent)
+	}
+}
+
+func TestDecodeClientEventMapsAdvancedGamePreset(t *testing.T) {
+	event, err := DecodeClientEvent(strings.NewReader(`{"type":"set_game_preset","preset":"ADVANCED"}`))
+	if err != nil {
+		t.Fatalf("decode preset: %v", err)
+	}
+	if event.RoomEvent("owner", "Owner").GamePreset != room.GamePresetAdvanced {
+		t.Fatalf("preset = %s, want %s", event.Preset, room.GamePresetAdvanced)
 	}
 }
 

@@ -160,6 +160,7 @@
         "killers",
         "detectives",
         "doctors",
+        "escorts",
         "shooters"
       ],
       "properties": {
@@ -197,6 +198,11 @@
           "minimum": 0,
           "maximum": 1
         },
+        "escorts": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
         "shooters": {
           "type": "integer",
           "minimum": 0,
@@ -212,7 +218,7 @@
         "type": { "const": "set_game_preset" },
         "sequence": { "$ref": "#/$defs/sequence" },
         "preset": {
-          "enum": ["STANDARD", "QUICK", "BEGINNER", "MINIMAL"]
+          "enum": ["STANDARD", "QUICK", "BEGINNER", "ADVANCED", "MINIMAL"]
         }
       }
     },

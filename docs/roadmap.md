@@ -32,16 +32,18 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 - Room lock and configurable player cap
 - Spectators with private reconnect credentials
 - Room-owned phase durations, minimum players, death-role reveal, and role pool
-- Server-authoritative standard, quick, beginner, and minimal presets
+- Server-authoritative standard, quick, beginner, advanced, and minimal presets
 - Server validation for duration, capacity, role legality, and starting balance
 - Automatic browser reconnect with capped exponential backoff
 - One active WebSocket per player or spectator identity
 - Sequenced client events, acknowledgements, pending replay, and server deduplication
 - Public disconnected and AFK participant signals
+- Registry-backed role capabilities and ordered night-action resolution
+- Escort role with action blocking and an advanced preset
 
 ## Next Tasks
 
-1. Refactor roles into an extensible rule system and add more roles, ordered night actions, last words, or alternate modes.
+1. Add a last-words phase and continue expanding roles or alternate modes on the rule registry.
 2. Add Docker Compose for local deployment.
 3. Add GitHub Actions for `make test`.
 4. Add a load test script for WebSocket rooms.
@@ -51,4 +53,4 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 
 ## Current Priority
 
-The current priority is the extensible game-rule layer. Connection loss is now recoverable and sequenced; the next requirement is to separate role definitions, night-action ordering, resolution, and win rules so new roles and modes do not keep expanding one monolithic state switch.
+The role registry now centralizes faction, night ability, action priority, target policy, day ability, deck construction, investigation alignment, and win counting. The current priority is a server-authoritative last-words phase after execution, followed by additional registry-backed roles or alternate win modes.

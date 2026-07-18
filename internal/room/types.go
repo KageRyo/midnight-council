@@ -44,6 +44,7 @@ const (
 	RoleKiller    Role = "KILLER"
 	RoleDetective Role = "DETECTIVE"
 	RoleDoctor    Role = "DOCTOR"
+	RoleEscort    Role = "ESCORT"
 	RoleShooter   Role = "SHOOTER"
 )
 
@@ -60,6 +61,7 @@ const (
 	NightActionKill        NightActionType = "KILL"
 	NightActionInvestigate NightActionType = "INVESTIGATE"
 	NightActionProtect     NightActionType = "PROTECT"
+	NightActionBlock       NightActionType = "BLOCK"
 	NightActionPass        NightActionType = "PASS"
 )
 

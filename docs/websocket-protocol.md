@@ -42,7 +42,7 @@ Every client event is one text frame containing exactly one JSON object. Unknown
 | `kick_participant` | `target_id` string | — | Owner removes a player or spectator while waiting or after a game |
 | `set_room_locked` | `locked` boolean | — | Owner allows or blocks new participants |
 | `set_player_limit` | `max_players` integer | — | Owner sets the player cap from 2 through 20 while waiting or after a game |
-| `set_game_preset` | `preset` string | — | Owner applies `STANDARD`, `QUICK`, `BEGINNER`, or `MINIMAL` |
+| `set_game_preset` | `preset` string | — | Owner applies `STANDARD`, `QUICK`, `BEGINNER`, `ADVANCED`, or `MINIMAL` |
 | `set_game_settings` | all setting fields | — | Owner replaces the complete custom game configuration |
 | `presence` | `afk` boolean | — | Publish the participant's current AFK signal |
 | `return_to_waiting` | — | — | Owner resets an active or finished room for a rematch |
@@ -80,6 +80,7 @@ The server sends one of four envelope types.
         "killers": 1,
         "detectives": 1,
         "doctors": 1,
+        "escorts": 0,
         "shooters": 1
       }
     },
@@ -207,11 +208,14 @@ A custom replacement must provide every field:
   "killers": 1,
   "detectives": 1,
   "doctors": 1,
+  "escorts": 0,
   "shooters": 0
 }
 ```
 
-Durations use Go duration syntax and must be between one second and one hour. Minimum players must be from 2 through 20 and no greater than `max_players`. The current engine requires exactly one killer; detective, doctor, and shooter counts must each be zero or one. Enabled roles are used in that order while reserving one villager seat, then all remaining players become villagers.
+Durations use Go duration syntax and must be between one second and one hour. Minimum players must be from 2 through 20 and no greater than `max_players`. The current engine requires exactly one killer; detective, doctor, escort, and shooter counts must each be zero or one. Enabled roles are used in that order while reserving one villager seat, then all remaining players become villagers.
+
+`ESCORT` submits the same `night_action` event as other night roles but cannot target itself. Night resolution follows the role registry's priority: escort block, doctor protection, killer attack, then detective investigation. A blocked player's action is ignored for that night. `ADVANCED` enables one escort and requires six players so every current special role can enter the deck while retaining a villager.
 
 Both setting events are owner-only and accepted only in `WAITING` or `FINISHED`. A successful update resets non-owner readiness and changes the deadlines and role deck used by the next game. Settings persist across `return_to_waiting`. With `reveal_roles_on_death`, dead roles are public during active phases while living roles remain private.
 

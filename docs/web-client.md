@@ -67,12 +67,14 @@ Spectators have a separate identity card and participant list. They never see ro
 
 ## Game Settings
 
-Every participant sees the current game-setting summary. The owner additionally receives an editor while the room is waiting or finished. The editor can apply the server-provided `STANDARD`, `QUICK`, `BEGINNER`, or `MINIMAL` preset, or switch to `CUSTOM` and choose:
+Every participant sees the current game-setting summary. The owner additionally receives an editor while the room is waiting or finished. The editor can apply the server-provided `STANDARD`, `QUICK`, `BEGINNER`, `ADVANCED`, or `MINIMAL` preset, or switch to `CUSTOM` and choose:
 
 - night, discussion, and voting durations from one second through one hour;
 - minimum players, bounded by the room player cap;
 - immediate role reveal when a player is eliminated;
-- one required killer and optional detective, doctor, and shooter slots.
+- one required killer and optional detective, doctor, escort, and shooter slots.
+
+The escort is a night role. Its target's submitted role action is ignored for that night. The client prevents self-targeting and presents the server-defined resolution order as block, protect, kill, then investigate; the room state validates the same rules authoritatively.
 
 The browser performs convenience checks, but the server remains authoritative for duration parsing, capacity compatibility, role counts, and start eligibility. Applying a setting resets all non-owner readiness. The start button and waiting hint use `game_settings.minimum_players`, not a hard-coded count.
 
