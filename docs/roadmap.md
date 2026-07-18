@@ -31,19 +31,21 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 - Owner transfer, automatic owner succession, and participant kick
 - Room lock and configurable player cap
 - Spectators with private reconnect credentials
+- Room-owned phase durations, minimum players, death-role reveal, and role pool
+- Server-authoritative standard, quick, beginner, and minimal presets
+- Server validation for duration, capacity, role legality, and starting balance
 
 ## Next Tasks
 
-1. Add configurable game settings with server-validated role balance and presets.
-2. Improve connection reliability with automatic reconnect, one active connection per seat, event sequencing, deduplication, and AFK signals.
-3. Refactor roles into an extensible rule system and add more roles, ordered night actions, last words, or alternate modes.
-4. Add Docker Compose for local deployment.
-5. Add GitHub Actions for `make test`.
-6. Add a load test script for WebSocket rooms.
-7. Add JWT authentication for persistent accounts.
-8. Add PostgreSQL persistence for accounts, game summaries, and audit logs.
-9. Add Redis Pub/Sub support for future multi-instance room routing.
+1. Improve connection reliability with automatic reconnect, one active connection per seat, event sequencing, deduplication, and AFK signals.
+2. Refactor roles into an extensible rule system and add more roles, ordered night actions, last words, or alternate modes.
+3. Add Docker Compose for local deployment.
+4. Add GitHub Actions for `make test`.
+5. Add a load test script for WebSocket rooms.
+6. Add JWT authentication for persistent accounts.
+7. Add PostgreSQL persistence for accounts, game summaries, and audit logs.
+8. Add Redis Pub/Sub support for future multi-instance room routing.
 
 ## Current Priority
 
-The current priority is configurable room-owned game settings. The full room lifecycle now supports repeated play and administration; the next step is to make phase timing, role composition, identity reveal, minimum players, and validated rule presets part of each room rather than process-wide or hard-coded behavior.
+The current priority is connection reliability. Rooms now support repeated play and validated game settings; the next requirement is to make temporary network loss safe through automatic reconnect, one active socket per identity, event sequencing and deduplication, and visible disconnect or AFK state.

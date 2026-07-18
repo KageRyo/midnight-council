@@ -288,6 +288,7 @@ func TestStartGamePublishesServerAuthoritativeNightDeadline(t *testing.T) {
 		DayDiscussion: time.Minute,
 		DayVoting:     30 * time.Second,
 	}
+	state.gameSettings = StandardGameSettings(state.phaseDurations)
 	startedAt := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
 
 	envelope, err := state.Apply(Event{Type: EventStartGame, PlayerID: "owner", At: startedAt})

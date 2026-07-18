@@ -29,6 +29,8 @@ const (
 	EventKickParticipant EventType = "kick_participant"
 	EventSetRoomLocked   EventType = "set_room_locked"
 	EventSetPlayerLimit  EventType = "set_player_limit"
+	EventSetGameSettings EventType = "set_game_settings"
+	EventSetGamePreset   EventType = "set_game_preset"
 	EventReturnToWaiting EventType = "return_to_waiting"
 	EventPhaseTimeout    EventType = "phase_timeout"
 )
@@ -84,6 +86,8 @@ type Event struct {
 	Ready          bool
 	Locked         bool
 	MaxPlayers     int
+	GameSettings   GameSettings
+	GamePreset     GamePreset
 	Message        string
 	TargetID       string
 	At             time.Time
@@ -136,6 +140,8 @@ type Snapshot struct {
 	Spectators     []SpectatorView `json:"spectators,omitempty"`
 	Locked         bool            `json:"locked"`
 	MaxPlayers     int             `json:"max_players"`
+	GameSettings   GameSettings    `json:"game_settings"`
+	GamePresets    []GameSettings  `json:"game_presets"`
 	Result         *GameResult     `json:"result,omitempty"`
 	Log            []LogEntry      `json:"log,omitempty"`
 	UpdatedAt      time.Time       `json:"updated_at"`

@@ -482,6 +482,87 @@ func TestHandlerClosesKickedParticipantConnection(t *testing.T) {
 	}
 }
 
+func TestHandlerSupportsServerValidatedGameSettings(t *testing.T) {
+	server := httptest.NewServer(NewHandler(room.NewHub()))
+	defer server.Close()
+
+	clients := []*testClient{
+		connectClient(t, server.URL, "owner", "Owner"),
+		connectClient(t, server.URL, "guest-1", "Guest 1"),
+		connectClient(t, server.URL, "guest-2", "Guest 2"),
+		connectClient(t, server.URL, "guest-3", "Guest 3"),
+	}
+	defer closeClients(clients)
+
+	for _, client := range clients {
+		readStateUntil(t, client, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+			return len(state.Players) == 4
+		})
+	}
+	for _, client := range clients[1:] {
+		writeClientEvent(t, client, map[string]any{"type": "ready", "ready": true})
+	}
+	readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return nonOwnerPlayersReady(state)
+	})
+
+	writeClientEvent(t, clients[0], map[string]any{
+		"type":                    "set_game_settings",
+		"night_duration":          "30s",
+		"day_discussion_duration": "40s",
+		"day_voting_duration":     "30s",
+		"minimum_players":         4,
+		"reveal_roles_on_death":   true,
+		"killers":                 1,
+		"detectives":              0,
+		"doctors":                 0,
+		"shooters":                0,
+	})
+	settingsState := readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.GameSettings.Preset == room.GamePresetCustom &&
+			state.GameSettings.NightDuration == "30s"
+	})
+	if nonOwnerPlayersReady(settingsState.State) {
+		t.Fatal("settings change did not reset readiness")
+	}
+
+	writeClientEvent(t, clients[0], map[string]any{
+		"type":                    "set_game_settings",
+		"night_duration":          "30s",
+		"day_discussion_duration": "40s",
+		"day_voting_duration":     "30s",
+		"minimum_players":         3,
+		"reveal_roles_on_death":   false,
+		"killers":                 2,
+		"detectives":              0,
+		"doctors":                 0,
+		"shooters":                0,
+	})
+	readEnvelopeUntil(t, clients[0], func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && envelope.Error == room.ErrInvalidRoleConfiguration.Error()
+	})
+
+	for _, client := range clients[1:] {
+		writeClientEvent(t, client, map[string]any{"type": "ready", "ready": true})
+	}
+	readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return nonOwnerPlayersReady(state)
+	})
+	writeClientEvent(t, clients[0], map[string]any{"type": "start_game"})
+
+	roleCounts := make(map[room.Role]int)
+	for _, client := range clients {
+		envelope := readStateUntil(t, client, func(state *room.Snapshot, private *room.PrivatePlayerView) bool {
+			return state.Phase == room.PhaseNight && private != nil && private.Role != ""
+		})
+		roleCounts[envelope.Private.Role]++
+		assertSnapshotDeadline(t, envelope.State, 30*time.Second)
+	}
+	if roleCounts[room.RoleKiller] != 1 || roleCounts[room.RoleVillager] != 3 || len(roleCounts) != 2 {
+		t.Fatalf("role counts = %#v", roleCounts)
+	}
+}
+
 func assertSnapshotDeadline(t *testing.T, state *room.Snapshot, duration time.Duration) {
 	t.Helper()
 	if state.PhaseStartedAt.IsZero() {

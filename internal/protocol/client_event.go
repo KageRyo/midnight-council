@@ -15,12 +15,22 @@ import (
 var validate = validator.New(validator.WithRequiredStructEnabled())
 
 type ClientEvent struct {
-	Type       room.EventType `json:"type" validate:"required,oneof=ready start_game chat night_action night_pass start_vote vote shoot transfer_owner kick_participant set_room_locked set_player_limit return_to_waiting"`
-	Ready      *bool          `json:"ready,omitempty"`
-	Message    string         `json:"message,omitempty"`
-	TargetID   string         `json:"target_id,omitempty"`
-	Locked     *bool          `json:"locked,omitempty"`
-	MaxPlayers *int           `json:"max_players,omitempty"`
+	Type                  room.EventType  `json:"type" validate:"required,oneof=ready start_game chat night_action night_pass start_vote vote shoot transfer_owner kick_participant set_room_locked set_player_limit set_game_settings set_game_preset return_to_waiting"`
+	Ready                 *bool           `json:"ready,omitempty"`
+	Message               string          `json:"message,omitempty"`
+	TargetID              string          `json:"target_id,omitempty"`
+	Locked                *bool           `json:"locked,omitempty"`
+	MaxPlayers            *int            `json:"max_players,omitempty"`
+	Preset                room.GamePreset `json:"preset,omitempty"`
+	NightDuration         string          `json:"night_duration,omitempty"`
+	DayDiscussionDuration string          `json:"day_discussion_duration,omitempty"`
+	DayVotingDuration     string          `json:"day_voting_duration,omitempty"`
+	MinimumPlayers        *int            `json:"minimum_players,omitempty"`
+	RevealRolesOnDeath    *bool           `json:"reveal_roles_on_death,omitempty"`
+	Killers               *int            `json:"killers,omitempty"`
+	Detectives            *int            `json:"detectives,omitempty"`
+	Doctors               *int            `json:"doctors,omitempty"`
+	Shooters              *int            `json:"shooters,omitempty"`
 }
 
 func DecodeClientEvent(reader io.Reader) (ClientEvent, error) {
@@ -57,6 +67,7 @@ func (e ClientEvent) RoomEvent(playerID, playerName string) room.Event {
 		PlayerName: playerName,
 		Message:    strings.TrimSpace(e.Message),
 		TargetID:   strings.TrimSpace(e.TargetID),
+		GamePreset: e.Preset,
 	}
 	if e.Ready != nil {
 		event.Ready = *e.Ready
@@ -67,6 +78,20 @@ func (e ClientEvent) RoomEvent(playerID, playerName string) room.Event {
 	if e.MaxPlayers != nil {
 		event.MaxPlayers = *e.MaxPlayers
 	}
+	event.GameSettings = room.GameSettings{
+		Preset:                room.GamePresetCustom,
+		NightDuration:         strings.TrimSpace(e.NightDuration),
+		DayDiscussionDuration: strings.TrimSpace(e.DayDiscussionDuration),
+		DayVotingDuration:     strings.TrimSpace(e.DayVotingDuration),
+		MinimumPlayers:        intValue(e.MinimumPlayers),
+		RevealRolesOnDeath:    boolValue(e.RevealRolesOnDeath),
+		Roles: room.RoleConfiguration{
+			Killers:    intValue(e.Killers),
+			Detectives: intValue(e.Detectives),
+			Doctors:    intValue(e.Doctors),
+			Shooters:   intValue(e.Shooters),
+		},
+	}
 	return event
 }
 
@@ -76,7 +101,7 @@ func (e ClientEvent) validateShape() error {
 		if e.Ready == nil {
 			return errors.New("ready event requires ready")
 		}
-		return rejectFields(e, false, true, true, true, true)
+		return rejectUnexpectedFields(e, fieldReady)
 	case room.EventChat:
 		if strings.TrimSpace(e.Message) == "" {
 			return errors.New("chat event requires message")
@@ -84,51 +109,130 @@ func (e ClientEvent) validateShape() error {
 		if len([]byte(strings.TrimSpace(e.Message))) > room.MaxChatBytes {
 			return room.ErrMessageTooLong
 		}
-		return rejectFields(e, true, false, true, true, true)
+		return rejectUnexpectedFields(e, fieldMessage)
 	case room.EventNightAction, room.EventShoot:
 		if strings.TrimSpace(e.TargetID) == "" {
 			return fmt.Errorf("%s event requires target_id", e.Type)
 		}
-		return rejectFields(e, true, true, false, true, true)
+		return rejectUnexpectedFields(e, fieldTargetID)
 	case room.EventVote:
-		return rejectFields(e, true, true, false, true, true)
+		return rejectUnexpectedFields(e, fieldTargetID)
 	case room.EventTransferOwner, room.EventKickParticipant:
 		if strings.TrimSpace(e.TargetID) == "" {
 			return fmt.Errorf("%s event requires target_id", e.Type)
 		}
-		return rejectFields(e, true, true, false, true, true)
+		return rejectUnexpectedFields(e, fieldTargetID)
 	case room.EventSetRoomLocked:
 		if e.Locked == nil {
 			return errors.New("set_room_locked event requires locked")
 		}
-		return rejectFields(e, true, true, true, false, true)
+		return rejectUnexpectedFields(e, fieldLocked)
 	case room.EventSetPlayerLimit:
 		if e.MaxPlayers == nil {
 			return errors.New("set_player_limit event requires max_players")
 		}
-		return rejectFields(e, true, true, true, true, false)
+		return rejectUnexpectedFields(e, fieldMaxPlayers)
+	case room.EventSetGamePreset:
+		if e.Preset == "" {
+			return errors.New("set_game_preset event requires preset")
+		}
+		switch e.Preset {
+		case room.GamePresetStandard, room.GamePresetQuick, room.GamePresetBeginner, room.GamePresetMinimal:
+		default:
+			return room.ErrInvalidGamePreset
+		}
+		return rejectUnexpectedFields(e, fieldPreset)
+	case room.EventSetGameSettings:
+		if strings.TrimSpace(e.NightDuration) == "" ||
+			strings.TrimSpace(e.DayDiscussionDuration) == "" ||
+			strings.TrimSpace(e.DayVotingDuration) == "" ||
+			e.MinimumPlayers == nil ||
+			e.RevealRolesOnDeath == nil ||
+			e.Killers == nil ||
+			e.Detectives == nil ||
+			e.Doctors == nil ||
+			e.Shooters == nil {
+			return errors.New("set_game_settings event requires all game setting fields")
+		}
+		return rejectUnexpectedFields(
+			e,
+			fieldNightDuration,
+			fieldDayDiscussionDuration,
+			fieldDayVotingDuration,
+			fieldMinimumPlayers,
+			fieldRevealRolesOnDeath,
+			fieldKillers,
+			fieldDetectives,
+			fieldDoctors,
+			fieldShooters,
+		)
 	case room.EventStartGame, room.EventNightPass, room.EventStartVote, room.EventReturnToWaiting:
-		return rejectFields(e, true, true, true, true, true)
+		return rejectUnexpectedFields(e)
 	default:
 		return fmt.Errorf("unsupported client event type: %s", e.Type)
 	}
 }
 
-func rejectFields(e ClientEvent, rejectReady, rejectMessage, rejectTarget, rejectLocked, rejectMaxPlayers bool) error {
-	if rejectReady && e.Ready != nil {
-		return fmt.Errorf("%s event does not accept ready", e.Type)
+type clientField string
+
+const (
+	fieldReady                 clientField = "ready"
+	fieldMessage               clientField = "message"
+	fieldTargetID              clientField = "target_id"
+	fieldLocked                clientField = "locked"
+	fieldMaxPlayers            clientField = "max_players"
+	fieldPreset                clientField = "preset"
+	fieldNightDuration         clientField = "night_duration"
+	fieldDayDiscussionDuration clientField = "day_discussion_duration"
+	fieldDayVotingDuration     clientField = "day_voting_duration"
+	fieldMinimumPlayers        clientField = "minimum_players"
+	fieldRevealRolesOnDeath    clientField = "reveal_roles_on_death"
+	fieldKillers               clientField = "killers"
+	fieldDetectives            clientField = "detectives"
+	fieldDoctors               clientField = "doctors"
+	fieldShooters              clientField = "shooters"
+)
+
+func rejectUnexpectedFields(e ClientEvent, allowedFields ...clientField) error {
+	allowed := make(map[clientField]bool, len(allowedFields))
+	for _, field := range allowedFields {
+		allowed[field] = true
 	}
-	if rejectMessage && strings.TrimSpace(e.Message) != "" {
-		return fmt.Errorf("%s event does not accept message", e.Type)
+	provided := []struct {
+		field   clientField
+		present bool
+	}{
+		{field: fieldReady, present: e.Ready != nil},
+		{field: fieldMessage, present: strings.TrimSpace(e.Message) != ""},
+		{field: fieldTargetID, present: strings.TrimSpace(e.TargetID) != ""},
+		{field: fieldLocked, present: e.Locked != nil},
+		{field: fieldMaxPlayers, present: e.MaxPlayers != nil},
+		{field: fieldPreset, present: e.Preset != ""},
+		{field: fieldNightDuration, present: strings.TrimSpace(e.NightDuration) != ""},
+		{field: fieldDayDiscussionDuration, present: strings.TrimSpace(e.DayDiscussionDuration) != ""},
+		{field: fieldDayVotingDuration, present: strings.TrimSpace(e.DayVotingDuration) != ""},
+		{field: fieldMinimumPlayers, present: e.MinimumPlayers != nil},
+		{field: fieldRevealRolesOnDeath, present: e.RevealRolesOnDeath != nil},
+		{field: fieldKillers, present: e.Killers != nil},
+		{field: fieldDetectives, present: e.Detectives != nil},
+		{field: fieldDoctors, present: e.Doctors != nil},
+		{field: fieldShooters, present: e.Shooters != nil},
 	}
-	if rejectTarget && strings.TrimSpace(e.TargetID) != "" {
-		return fmt.Errorf("%s event does not accept target_id", e.Type)
-	}
-	if rejectLocked && e.Locked != nil {
-		return fmt.Errorf("%s event does not accept locked", e.Type)
-	}
-	if rejectMaxPlayers && e.MaxPlayers != nil {
-		return fmt.Errorf("%s event does not accept max_players", e.Type)
+	for _, candidate := range provided {
+		if candidate.present && !allowed[candidate.field] {
+			return fmt.Errorf("%s event does not accept %s", e.Type, candidate.field)
+		}
 	}
 	return nil
+}
+
+func intValue(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
+}
+
+func boolValue(value *bool) bool {
+	return value != nil && *value
 }

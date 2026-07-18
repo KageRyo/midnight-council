@@ -42,6 +42,8 @@ Every client event is one text frame containing exactly one JSON object. Unknown
 | `kick_participant` | `target_id` string | — | Owner removes a player or spectator while waiting or after a game |
 | `set_room_locked` | `locked` boolean | — | Owner allows or blocks new participants |
 | `set_player_limit` | `max_players` integer | — | Owner sets the player cap from 2 through 20 while waiting or after a game |
+| `set_game_preset` | `preset` string | — | Owner applies `STANDARD`, `QUICK`, `BEGINNER`, or `MINIMAL` |
+| `set_game_settings` | all setting fields | — | Owner replaces the complete custom game configuration |
 | `return_to_waiting` | — | — | Owner resets an active or finished room for a rematch |
 
 Examples and the current event schema are in `README.md` and `docs/websocket-client-event.schema.json`.
@@ -66,6 +68,21 @@ The server sends one of three envelope types.
     "spectators": [],
     "locked": false,
     "max_players": 12,
+    "game_settings": {
+      "preset": "STANDARD",
+      "night_duration": "1m30s",
+      "day_discussion_duration": "5m0s",
+      "day_voting_duration": "1m0s",
+      "minimum_players": 2,
+      "reveal_roles_on_death": false,
+      "roles": {
+        "killers": 1,
+        "detectives": 1,
+        "doctors": 1,
+        "shooters": 1
+      }
+    },
+    "game_presets": [],
     "log": [],
     "updated_at": "2026-07-14T09:00:00Z",
     "server_time": "2026-07-14T09:00:10Z"
@@ -146,6 +163,35 @@ Replacement text is trimmed and must remain non-empty and at most 500 bytes. A r
 
 The default policy allows every message unchanged. Moderation does not replace normal room authorization: an allowed message can still be rejected by room state, for example when a dead player attempts to chat during an active game.
 
+## Game Settings
+
+The server publishes the current `game_settings` plus the definitions of its available `game_presets`. Presets are authoritative server data; clients apply one by name:
+
+```json
+{"type":"set_game_preset","preset":"QUICK"}
+```
+
+A custom replacement must provide every field:
+
+```json
+{
+  "type": "set_game_settings",
+  "night_duration": "45s",
+  "day_discussion_duration": "2m",
+  "day_voting_duration": "45s",
+  "minimum_players": 4,
+  "reveal_roles_on_death": true,
+  "killers": 1,
+  "detectives": 1,
+  "doctors": 1,
+  "shooters": 0
+}
+```
+
+Durations use Go duration syntax and must be between one second and one hour. Minimum players must be from 2 through 20 and no greater than `max_players`. The current engine requires exactly one killer; detective, doctor, and shooter counts must each be zero or one. Enabled roles are used in that order while reserving one villager seat, then all remaining players become villagers.
+
+Both setting events are owner-only and accepted only in `WAITING` or `FINISHED`. A successful update resets non-owner readiness and changes the deadlines and role deck used by the next game. Settings persist across `return_to_waiting`. With `reveal_roles_on_death`, dead roles are public during active phases while living roles remain private.
+
 ## Room Lifecycle
 
 - The first seated player becomes owner. Ownership can be transferred explicitly to another connected player.
@@ -171,6 +217,8 @@ The default policy allows every message unchanged. Moderation does not replace n
 | `kick_participant` | owner | no | no | no | owner |
 | `set_room_locked` | owner | owner | owner | owner | owner |
 | `set_player_limit` | owner | no | no | no | owner |
+| `set_game_preset` | owner | no | no | no | owner |
+| `set_game_settings` | owner | no | no | no | owner |
 | `return_to_waiting` | no | owner | owner | owner | owner |
 
 The state layer remains authoritative for every condition shown in this table.

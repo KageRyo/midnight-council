@@ -131,3 +131,62 @@ func TestDecodeClientEventRequiresRoomLifecycleFields(t *testing.T) {
 		}
 	}
 }
+
+func TestDecodeClientEventMapsGameSettings(t *testing.T) {
+	event, err := DecodeClientEvent(strings.NewReader(`{
+		"type":"set_game_settings",
+		"night_duration":"45s",
+		"day_discussion_duration":"2m",
+		"day_voting_duration":"30s",
+		"minimum_players":4,
+		"reveal_roles_on_death":true,
+		"killers":1,
+		"detectives":1,
+		"doctors":0,
+		"shooters":1
+	}`))
+	if err != nil {
+		t.Fatalf("decode settings: %v", err)
+	}
+	roomEvent := event.RoomEvent("owner", "Owner")
+	settings := roomEvent.GameSettings
+	if roomEvent.Type != room.EventSetGameSettings ||
+		settings.Preset != room.GamePresetCustom ||
+		settings.NightDuration != "45s" ||
+		settings.DayDiscussionDuration != "2m" ||
+		settings.DayVotingDuration != "30s" ||
+		settings.MinimumPlayers != 4 ||
+		!settings.RevealRolesOnDeath ||
+		settings.Roles != (room.RoleConfiguration{Killers: 1, Detectives: 1, Shooters: 1}) {
+		t.Fatalf("room settings event = %#v", roomEvent)
+	}
+}
+
+func TestDecodeClientEventMapsGamePreset(t *testing.T) {
+	event, err := DecodeClientEvent(strings.NewReader(`{"type":"set_game_preset","preset":"QUICK"}`))
+	if err != nil {
+		t.Fatalf("decode preset: %v", err)
+	}
+	roomEvent := event.RoomEvent("owner", "Owner")
+	if roomEvent.Type != room.EventSetGamePreset || roomEvent.GamePreset != room.GamePresetQuick {
+		t.Fatalf("room preset event = %#v", roomEvent)
+	}
+}
+
+func TestDecodeClientEventRequiresCompleteGameSettings(t *testing.T) {
+	for _, payload := range []string{
+		`{"type":"set_game_settings","night_duration":"45s"}`,
+		`{"type":"set_game_preset"}`,
+		`{"type":"set_game_preset","preset":"CUSTOM"}`,
+	} {
+		if _, err := DecodeClientEvent(strings.NewReader(payload)); err == nil {
+			t.Fatalf("payload %s should be rejected", payload)
+		}
+	}
+}
+
+func TestDecodeClientEventRejectsGameSettingFieldsOnOtherEvents(t *testing.T) {
+	if _, err := DecodeClientEvent(strings.NewReader(`{"type":"start_game","minimum_players":4}`)); err == nil {
+		t.Fatal("start_game should reject minimum_players")
+	}
+}

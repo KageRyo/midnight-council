@@ -34,6 +34,7 @@ The client treats each server state envelope as authoritative and re-renders the
 - connection, room, phase, round, and server-synchronized countdown status;
 - public player seats and connection state;
 - room access state, player capacity, and the spectator list;
+- the current preset, timing, minimum players, role pool, and death-reveal rule;
 - the current player's private role and life state;
 - detective investigation results;
 - controls allowed by the current phase and `private.available`;
@@ -63,6 +64,17 @@ The owner panel reflects authoritative room state. It can lock or unlock new joi
 During an active or finished game, the owner can return the room to `WAITING`. The client asks for confirmation because the server clears the current result and game log. Connected identities remain in the room, player readiness resets, and the same group can prepare for another match without changing invitation links.
 
 Spectators have a separate identity card and participant list. They never see role actions, readiness, or voting controls. Spectator chat is available while waiting and after settlement, but disabled during active play to prevent live information from being relayed into the game.
+
+## Game Settings
+
+Every participant sees the current game-setting summary. The owner additionally receives an editor while the room is waiting or finished. The editor can apply the server-provided `STANDARD`, `QUICK`, `BEGINNER`, or `MINIMAL` preset, or switch to `CUSTOM` and choose:
+
+- night, discussion, and voting durations from one second through one hour;
+- minimum players, bounded by the room player cap;
+- immediate role reveal when a player is eliminated;
+- one required killer and optional detective, doctor, and shooter slots.
+
+The browser performs convenience checks, but the server remains authoritative for duration parsing, capacity compatibility, role counts, and start eligibility. Applying a setting resets all non-owner readiness. The start button and waiting hint use `game_settings.minimum_players`, not a hard-coded count.
 
 ## Server-Synchronized Countdown
 
@@ -122,7 +134,9 @@ For a manual multiplayer check:
 7. Join a spectator during the active game and confirm it receives no role or action controls and cannot chat.
 8. Return to waiting and confirm roles, readiness, result, and game log reset while connected identities remain.
 9. Exercise lock, player cap, kick, and ownership transfer controls.
-10. Run with short phase durations and confirm missing actions, discussion, and votes advance automatically.
+10. Apply a preset, then a custom rule set; confirm readiness resets, minimum-player gating changes, and the next night uses the selected duration.
+11. Enable death-role reveal and confirm an eliminated role becomes public while living roles remain hidden.
+12. Run with short phase durations and confirm missing actions, discussion, and votes advance automatically.
 
 The Go suite tests embedded assets and the complete WebSocket game flow:
 

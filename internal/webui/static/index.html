@@ -149,6 +149,60 @@
               <ul id="spectator-list" class="spectator-list"></ul>
             </section>
 
+            <section id="game-settings-card" class="game-settings-card panel" aria-labelledby="game-settings-title">
+              <div class="section-title-row compact">
+                <div>
+                  <p class="eyebrow">GAME RULES</p>
+                  <h2 id="game-settings-title">本局設定</h2>
+                </div>
+                <span id="game-settings-preset-badge" class="count-badge">標準</span>
+              </div>
+              <ul id="game-settings-summary" class="settings-summary"></ul>
+
+              <form id="game-settings-form" class="settings-form" hidden>
+                <label for="game-preset-select">規則預設</label>
+                <select id="game-preset-select"></select>
+
+                <div class="settings-grid">
+                  <label>
+                    夜晚秒數
+                    <input id="setting-night-seconds" type="number" min="1" max="3600" step="1" required>
+                  </label>
+                  <label>
+                    討論秒數
+                    <input id="setting-discussion-seconds" type="number" min="1" max="3600" step="1" required>
+                  </label>
+                  <label>
+                    投票秒數
+                    <input id="setting-voting-seconds" type="number" min="1" max="3600" step="1" required>
+                  </label>
+                  <label>
+                    最低人數
+                    <input id="setting-minimum-players" type="number" min="2" max="20" step="1" required>
+                  </label>
+                  <label>
+                    殺手人數
+                    <input id="setting-killers" type="number" min="1" max="1" step="1" value="1" readonly required>
+                  </label>
+                </div>
+
+                <fieldset class="settings-role-options">
+                  <legend>可用特殊角色</legend>
+                  <label><input id="setting-detective" type="checkbox"> 偵探</label>
+                  <label><input id="setting-doctor" type="checkbox"> 醫生</label>
+                  <label><input id="setting-shooter" type="checkbox"> 槍手</label>
+                </fieldset>
+
+                <label class="inline-check" for="setting-reveal-roles">
+                  <input id="setting-reveal-roles" type="checkbox">
+                  玩家死亡後公開身分
+                </label>
+
+                <button id="game-settings-submit" class="secondary-button" type="submit">更新遊戲設定</button>
+                <p id="game-settings-hint" class="action-hint"></p>
+              </form>
+            </section>
+
             <section id="room-admin-card" class="room-admin-card panel" aria-labelledby="room-admin-title" hidden>
               <div class="section-title-row compact">
                 <div>

@@ -60,7 +60,9 @@ type State struct {
 	phase          Phase
 	phaseStartedAt time.Time
 	phaseDeadline  time.Time
+	baseDurations  PhaseDurations
 	phaseDurations PhaseDurations
+	gameSettings   GameSettings
 	ownerID        string
 	players        map[string]*Player
 	spectators     map[string]*Spectator
@@ -88,7 +90,9 @@ func newState(roomID string, phaseDurations PhaseDurations) *State {
 		roomID:         roomID,
 		phase:          PhaseWaiting,
 		phaseStartedAt: now,
+		baseDurations:  phaseDurations,
 		phaseDurations: phaseDurations,
+		gameSettings:   StandardGameSettings(phaseDurations),
 		players:        make(map[string]*Player),
 		spectators:     make(map[string]*Spectator),
 		maxPlayers:     DefaultMaxPlayers,
@@ -133,6 +137,10 @@ func (s *State) Apply(event Event) (*Envelope, error) {
 		return s.applySetRoomLocked(event)
 	case EventSetPlayerLimit:
 		return s.applySetPlayerLimit(event)
+	case EventSetGameSettings:
+		return s.applySetGameSettings(event)
+	case EventSetGamePreset:
+		return s.applySetGamePreset(event)
 	case EventReturnToWaiting:
 		return s.applyReturnToWaiting(event)
 	case EventPhaseTimeout:
@@ -144,7 +152,6 @@ func (s *State) Apply(event Event) (*Envelope, error) {
 
 func (s *State) Snapshot() Snapshot {
 	players := make([]PlayerView, 0, len(s.players))
-	revealRoles := s.phase == PhaseFinished
 
 	for _, player := range s.players {
 		alive := player.Alive
@@ -160,7 +167,8 @@ func (s *State) Snapshot() Snapshot {
 			Owner:     player.ID == s.ownerID,
 			Alive:     alive,
 		}
-		if revealRoles {
+		if s.phase == PhaseFinished ||
+			(s.gameSettings.RevealRolesOnDeath && s.phase != PhaseWaiting && !player.Alive) {
 			view.Role = player.Role
 		}
 		players = append(players, view)
@@ -207,6 +215,8 @@ func (s *State) Snapshot() Snapshot {
 		Spectators:     spectators,
 		Locked:         s.locked,
 		MaxPlayers:     s.maxPlayers,
+		GameSettings:   s.gameSettings,
+		GamePresets:    GamePresetCatalog(s.baseDurations),
 		Result:         s.result,
 		Log:            entries,
 		UpdatedAt:      s.updatedAt,
@@ -431,17 +441,22 @@ func (s *State) applyStartGame(event Event) (*Envelope, error) {
 	if event.PlayerID != s.ownerID {
 		return nil, ErrOwnerOnly
 	}
-	if len(s.players) < MinPlayersToStart {
+	durations, err := s.gameSettings.ValidateForStart(s.maxPlayers, s.baseDurations)
+	if err != nil {
+		return nil, err
+	}
+	if len(s.players) < s.gameSettings.MinimumPlayers {
 		return nil, ErrNotEnoughPlayers
 	}
 	if !s.nonOwnersReady() {
 		return nil, ErrPlayersNotReady
 	}
 
-	roles := roleDeck(len(s.players))
+	roles := roleDeckForSettings(len(s.players), s.gameSettings.Roles)
 	if err := shuffleRoles(roles); err != nil {
 		return nil, err
 	}
+	s.phaseDurations = durations
 
 	ids := s.sortedPlayerIDs()
 	for i, id := range ids {
@@ -724,8 +739,57 @@ func (s *State) applySetPlayerLimit(event Event) (*Envelope, error) {
 	if event.MaxPlayers < len(s.players) {
 		return nil, ErrPlayerLimitBelowCurrent
 	}
+	if event.MaxPlayers < s.gameSettings.MinimumPlayers {
+		return nil, ErrPlayerLimitBelowMinimum
+	}
 
 	s.maxPlayers = event.MaxPlayers
+	s.touch(event.At)
+	return stateEnvelope(s.Snapshot()), nil
+}
+
+func (s *State) applySetGameSettings(event Event) (*Envelope, error) {
+	if event.PlayerID != s.ownerID {
+		return nil, ErrOwnerOnly
+	}
+	if s.phase != PhaseWaiting && s.phase != PhaseFinished {
+		return nil, ErrWrongPhase
+	}
+
+	settings := event.GameSettings
+	settings.Preset = GamePresetCustom
+	durations, err := settings.Validate(s.maxPlayers)
+	if err != nil {
+		return nil, err
+	}
+
+	s.gameSettings = settings
+	s.phaseDurations = durations
+	s.clearReadiness()
+	s.touch(event.At)
+	return stateEnvelope(s.Snapshot()), nil
+}
+
+func (s *State) applySetGamePreset(event Event) (*Envelope, error) {
+	if event.PlayerID != s.ownerID {
+		return nil, ErrOwnerOnly
+	}
+	if s.phase != PhaseWaiting && s.phase != PhaseFinished {
+		return nil, ErrWrongPhase
+	}
+
+	settings, err := GameSettingsForPreset(event.GamePreset, s.baseDurations)
+	if err != nil {
+		return nil, err
+	}
+	durations, err := settings.ValidateForStart(s.maxPlayers, s.baseDurations)
+	if err != nil {
+		return nil, err
+	}
+
+	s.gameSettings = settings
+	s.phaseDurations = durations
+	s.clearReadiness()
 	s.touch(event.At)
 	return stateEnvelope(s.Snapshot()), nil
 }
@@ -948,6 +1012,14 @@ func (s *State) nonOwnersReady() bool {
 	return true
 }
 
+func (s *State) clearReadiness() {
+	for _, player := range s.players {
+		if player.ID != s.ownerID {
+			player.Ready = false
+		}
+	}
+}
+
 func (s *State) nextOwnerID() string {
 	ids := s.sortedPlayerIDs()
 	if len(ids) == 0 {
@@ -1123,20 +1195,12 @@ func isDayPhase(phase Phase) bool {
 }
 
 func roleDeck(playerCount int) []Role {
-	roles := []Role{RoleKiller, RoleVillager}
-	if playerCount >= 3 {
-		roles = append(roles, RoleDetective)
-	}
-	if playerCount >= 4 {
-		roles = append(roles, RoleDoctor)
-	}
-	if playerCount >= 5 {
-		roles = append(roles, RoleShooter)
-	}
-	for len(roles) < playerCount {
-		roles = append(roles, RoleVillager)
-	}
-	return roles
+	return roleDeckForSettings(playerCount, RoleConfiguration{
+		Killers:    1,
+		Detectives: 1,
+		Doctors:    1,
+		Shooters:   1,
+	})
 }
 
 func shuffleRoles(roles []Role) error {

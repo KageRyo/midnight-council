@@ -27,6 +27,9 @@ The Go server and its embedded web client already support a repeatable playable 
 - Player and spectator participation modes
 - Owner transfer, kick, room lock, and configurable player cap
 - Return-to-waiting reset and same-room rematches
+- Room-owned phase timing, minimum players, role pool, and death-reveal settings
+- Server-authoritative standard, quick, beginner, and minimal rule presets
+- Server validation for duration bounds, player-cap compatibility, and legal role balance
 - Room idle timeout and hub cleanup
 - Public event log for game flow
 - Strict WebSocket client event schema validation
@@ -73,7 +76,7 @@ Rooms with no active WebSocket subscribers are removed after `30m` by default. O
 ROOM_IDLE_TIMEOUT=5m make run
 ```
 
-Active game phases have server-authoritative deadlines. Defaults and overrides are:
+Active game phases have server-authoritative deadlines. These process values seed each room's `STANDARD` preset; the room owner may choose another preset or custom settings before a game:
 
 | Environment variable | Default | Phase |
 | --- | ---: | --- |
@@ -127,6 +130,7 @@ The client supports:
 - room creation and invitation links
 - player or spectator join
 - player readiness, owner administration, and same-room rematches
+- public game-setting summary and owner-only preset/custom editor
 - private role and investigation displays
 - role-aware night actions and passing
 - public discussion, voting, abstaining, and shooter actions
@@ -184,7 +188,21 @@ The server broadcasts envelopes:
     "players": [],
     "spectators": [],
     "locked": false,
-    "max_players": 12
+    "max_players": 12,
+    "game_settings": {
+      "preset": "STANDARD",
+      "night_duration": "1m30s",
+      "day_discussion_duration": "5m0s",
+      "day_voting_duration": "1m0s",
+      "minimum_players": 2,
+      "reveal_roles_on_death": false,
+      "roles": {
+        "killers": 1,
+        "detectives": 1,
+        "doctors": 1,
+        "shooters": 1
+      }
+    }
   },
   "private": {
     "player_id": "p1",
@@ -277,11 +295,34 @@ Return an active or finished room to `WAITING` for a rematch:
 {"type":"return_to_waiting"}
 ```
 
+Apply a server-defined game preset:
+
+```json
+{"type":"set_game_preset","preset":"QUICK"}
+```
+
+Set complete custom game settings:
+
+```json
+{
+  "type": "set_game_settings",
+  "night_duration": "45s",
+  "day_discussion_duration": "2m",
+  "day_voting_duration": "45s",
+  "minimum_players": 4,
+  "reveal_roles_on_death": true,
+  "killers": 1,
+  "detectives": 1,
+  "doctors": 1,
+  "shooters": 0
+}
+```
+
 ## Game Flow
 
 1. Players and optional spectators connect to the same room URL.
 2. Non-owner players send `ready`.
-3. The owner sends `start_game`.
+3. The owner selects a preset or custom rules, then sends `start_game` after the configured minimum player count and readiness requirements are met.
 4. The server shuffles roles and enters `NIGHT`.
 5. Alive `KILLER`, `DETECTIVE`, and `DOCTOR` players submit `night_action` or `night_pass`; missing actions become passes when the night deadline expires.
 6. The server resolves protection, kills, and detective results when every required action is present or time expires.

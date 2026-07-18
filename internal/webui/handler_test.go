@@ -130,6 +130,9 @@ func TestGameClientSupportsRoomLifecycleControls(t *testing.T) {
 	for _, id := range []string{
 		`id="join-as-spectator"`,
 		`id="spectator-list"`,
+		`id="game-settings-form"`,
+		`id="game-preset-select"`,
+		`id="setting-reveal-roles"`,
 		`id="room-admin-card"`,
 		`id="return-waiting-button"`,
 	} {
@@ -142,6 +145,8 @@ func TestGameClientSupportsRoomLifecycleControls(t *testing.T) {
 		"kick_participant",
 		"set_room_locked",
 		"set_player_limit",
+		"set_game_settings",
+		"set_game_preset",
 		"return_to_waiting",
 	} {
 		if !strings.Contains(string(app), eventType) {

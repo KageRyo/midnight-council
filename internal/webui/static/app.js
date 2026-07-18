@@ -4,6 +4,13 @@
   const SESSION_KEY = "midnight-council.sessions.v1";
   const LAST_NAME_KEY = "midnight-council.last-name.v1";
   const MAX_LOCAL_CHAT_MESSAGES = 150;
+  const presetLabels = {
+    STANDARD: "標準",
+    QUICK: "快速",
+    BEGINNER: "新手",
+    MINIMAL: "極簡",
+    CUSTOM: "自訂",
+  };
 
   const roles = {
     VILLAGER: {
@@ -98,6 +105,8 @@
     toastTimer: null,
     countdownInterval: null,
     serverClockOffset: 0,
+    settingsDirty: false,
+    renderedSettingsSignature: "",
   };
 
   const ui = Object.fromEntries(
@@ -134,6 +143,22 @@
       "spectators-card",
       "spectator-count",
       "spectator-list",
+      "game-settings-card",
+      "game-settings-preset-badge",
+      "game-settings-summary",
+      "game-settings-form",
+      "game-preset-select",
+      "setting-night-seconds",
+      "setting-discussion-seconds",
+      "setting-voting-seconds",
+      "setting-minimum-players",
+      "setting-killers",
+      "setting-detective",
+      "setting-doctor",
+      "setting-shooter",
+      "setting-reveal-roles",
+      "game-settings-submit",
+      "game-settings-hint",
       "room-admin-card",
       "room-lock-button",
       "player-limit-form",
@@ -209,6 +234,9 @@
     ui.playerLimitForm.addEventListener("submit", updatePlayerLimit);
     ui.ownerTransferForm.addEventListener("submit", transferOwner);
     ui.returnWaitingButton.addEventListener("click", returnToWaiting);
+    ui.gameSettingsForm.addEventListener("submit", updateGameSettings);
+    ui.gamePresetSelect.addEventListener("change", selectGamePreset);
+    ui.gameSettingsForm.addEventListener("input", markGameSettingsDirty);
     ui.nightActionForm.addEventListener("submit", submitNightAction);
     ui.nightPassButton.addEventListener("click", () => sendEvent({ type: "night_pass" }));
     ui.startVoteButton.addEventListener("click", () => sendEvent({ type: "start_vote" }));
@@ -249,6 +277,8 @@
     app.private = null;
     app.chats = [];
     app.intentionallyClosed = false;
+    app.settingsDirty = false;
+    app.renderedSettingsSignature = "";
 
     safeLocalStorageSet(LAST_NAME_KEY, playerName);
     setConnection("connecting", "正在進入議會…");
@@ -455,6 +485,67 @@
     }
   }
 
+  function updateGameSettings(event) {
+    event.preventDefault();
+    const preset = ui.gamePresetSelect.value;
+    if (preset && preset !== "CUSTOM") {
+      app.settingsDirty = false;
+      sendEvent({ type: "set_game_preset", preset });
+      return;
+    }
+
+    const nightSeconds = integerInput(ui.settingNightSeconds);
+    const discussionSeconds = integerInput(ui.settingDiscussionSeconds);
+    const votingSeconds = integerInput(ui.settingVotingSeconds);
+    const minimumPlayers = integerInput(ui.settingMinimumPlayers);
+    const killers = integerInput(ui.settingKillers);
+    if ([nightSeconds, discussionSeconds, votingSeconds].some((value) => value < 1 || value > 3600)) {
+      showToast("每個階段必須介於 1 秒到 1 小時。", true);
+      return;
+    }
+    if (minimumPlayers < 2 || minimumPlayers > 20) {
+      showToast("最低玩家人數必須介於 2 到 20。", true);
+      return;
+    }
+    if (killers !== 1) {
+      showToast("目前規則固定使用一名殺手。", true);
+      return;
+    }
+
+    app.settingsDirty = false;
+    sendEvent({
+      type: "set_game_settings",
+      night_duration: `${nightSeconds}s`,
+      day_discussion_duration: `${discussionSeconds}s`,
+      day_voting_duration: `${votingSeconds}s`,
+      minimum_players: minimumPlayers,
+      reveal_roles_on_death: ui.settingRevealRoles.checked,
+      killers,
+      detectives: ui.settingDetective.checked ? 1 : 0,
+      doctors: ui.settingDoctor.checked ? 1 : 0,
+      shooters: ui.settingShooter.checked ? 1 : 0,
+    });
+  }
+
+  function selectGamePreset() {
+    const preset = ui.gamePresetSelect.value;
+    const settings = app.state.game_presets?.find((candidate) => candidate.preset === preset);
+    if (settings) {
+      populateGameSettingsForm(settings);
+    }
+    app.settingsDirty = true;
+    updateSettingsFieldAvailability();
+  }
+
+  function markGameSettingsDirty(event) {
+    if (event.target === ui.gamePresetSelect) {
+      return;
+    }
+    ui.gamePresetSelect.value = "CUSTOM";
+    app.settingsDirty = true;
+    updateSettingsFieldAvailability();
+  }
+
   function submitNightAction(event) {
     event.preventDefault();
     if (!ui.nightTarget.value) {
@@ -506,6 +597,7 @@
     renderIdentity();
     renderPlayers();
     renderSpectators();
+    renderGameSettings();
     renderRoomAdmin();
     renderPhase();
     renderActions();
@@ -634,6 +726,89 @@
     ui.spectatorList.replaceChildren(...items);
   }
 
+  function renderGameSettings() {
+    const settings = app.state.game_settings;
+    if (!settings) {
+      ui.gameSettingsCard.hidden = true;
+      return;
+    }
+    ui.gameSettingsCard.hidden = false;
+    ui.gameSettingsPresetBadge.textContent = presetLabels[settings.preset] || settings.preset;
+
+    const enabledRoles = [`殺手 ×${settings.roles?.killers || 0}`];
+    if (settings.roles?.detectives) enabledRoles.push("偵探");
+    if (settings.roles?.doctors) enabledRoles.push("醫生");
+    if (settings.roles?.shooters) enabledRoles.push("槍手");
+    enabledRoles.push("其餘為平民");
+    ui.gameSettingsSummary.replaceChildren(
+      settingSummaryItem("階段時間", `${formatRuleDuration(settings.night_duration)}／${formatRuleDuration(settings.day_discussion_duration)}／${formatRuleDuration(settings.day_voting_duration)}`),
+      settingSummaryItem("最低人數", `${settings.minimum_players} 人`),
+      settingSummaryItem("角色組合", enabledRoles.join("、")),
+      settingSummaryItem("死亡身分", settings.reveal_roles_on_death ? "立即公開" : "結算時公開"),
+    );
+
+    const isOwner = isCurrentOwner();
+    ui.gameSettingsForm.hidden = !isOwner;
+    if (!isOwner) {
+      return;
+    }
+
+    const signature = JSON.stringify(settings);
+    ui.settingMinimumPlayers.max = String(app.state.max_players || 20);
+    if (!app.settingsDirty || signature !== app.renderedSettingsSignature) {
+      ui.gamePresetSelect.replaceChildren(
+        ...(app.state.game_presets || []).map((preset) => option(
+          preset.preset,
+          presetLabels[preset.preset] || preset.preset,
+        )),
+        option("CUSTOM", presetLabels.CUSTOM),
+      );
+      populateGameSettingsForm(settings);
+      ui.gamePresetSelect.value = settings.preset || "CUSTOM";
+      app.settingsDirty = false;
+      app.renderedSettingsSignature = signature;
+    }
+
+    updateSettingsFieldAvailability();
+    ui.gameSettingsHint.textContent = ["WAITING", "FINISHED"].includes(app.state.phase)
+      ? "變更設定會取消所有非房主玩家的準備狀態。目前固定一名殺手；特殊角色依序加入，剩餘席次自動成為平民。"
+      : "遊戲設定只能在等待室或結算後修改。";
+  }
+
+  function populateGameSettingsForm(settings) {
+    ui.settingNightSeconds.value = String(durationSeconds(settings.night_duration));
+    ui.settingDiscussionSeconds.value = String(durationSeconds(settings.day_discussion_duration));
+    ui.settingVotingSeconds.value = String(durationSeconds(settings.day_voting_duration));
+    ui.settingMinimumPlayers.value = String(settings.minimum_players);
+    ui.settingKillers.value = String(settings.roles?.killers || 1);
+    ui.settingDetective.checked = settings.roles?.detectives === 1;
+    ui.settingDoctor.checked = settings.roles?.doctors === 1;
+    ui.settingShooter.checked = settings.roles?.shooters === 1;
+    ui.settingRevealRoles.checked = settings.reveal_roles_on_death === true;
+  }
+
+  function updateSettingsFieldAvailability() {
+    const canEdit = isCurrentOwner() &&
+      ["WAITING", "FINISHED"].includes(app.state.phase) &&
+      app.socket?.readyState === WebSocket.OPEN;
+    const custom = ui.gamePresetSelect.value === "CUSTOM";
+    ui.gamePresetSelect.disabled = !canEdit;
+    ui.gameSettingsSubmit.disabled = !canEdit;
+    for (const control of [
+      ui.settingNightSeconds,
+      ui.settingDiscussionSeconds,
+      ui.settingVotingSeconds,
+      ui.settingMinimumPlayers,
+      ui.settingKillers,
+      ui.settingDetective,
+      ui.settingDoctor,
+      ui.settingShooter,
+      ui.settingRevealRoles,
+    ]) {
+      control.disabled = !canEdit || !custom;
+    }
+  }
+
   function renderRoomAdmin() {
     const isOwner = isCurrentOwner();
     const phaseAllowsRosterChanges = ["WAITING", "FINISHED"].includes(app.state.phase);
@@ -708,11 +883,12 @@
       ui.startGameButton.hidden = !isOwner;
       if (isOwner) {
         const nonOwners = app.state.players.filter((player) => !player.owner);
-        const enoughPlayers = app.state.players.length >= 2;
+        const minimumPlayers = app.state.game_settings?.minimum_players || 2;
+        const enoughPlayers = app.state.players.length >= minimumPlayers;
         const everyoneReady = nonOwners.every((player) => player.ready);
         ui.startGameButton.disabled = !enoughPlayers || !everyoneReady;
         ui.waitingHint.textContent = !enoughPlayers
-          ? "至少需要兩名玩家。分享邀請連結，等待另一位議員加入。"
+          ? `目前規則至少需要 ${minimumPlayers} 名玩家。分享邀請連結，等待更多議員加入。`
           : everyoneReady
             ? "所有人都已準備，可以開始遊戲。"
             : "等待所有非房主玩家完成準備。";
@@ -961,6 +1137,52 @@
     return item;
   }
 
+  function settingSummaryItem(label, value) {
+    const item = document.createElement("li");
+    item.append(element("span", "", label), element("strong", "", value));
+    return item;
+  }
+
+  function integerInput(input) {
+    const value = Number.parseInt(input.value, 10);
+    return Number.isInteger(value) ? value : -1;
+  }
+
+  function durationSeconds(value) {
+    if (typeof value !== "string" || value.length === 0) {
+      return 0;
+    }
+    const matches = [...value.matchAll(/(\d+(?:\.\d+)?)(ms|us|ns|h|m|s)/g)];
+    if (matches.map((match) => match[0]).join("") !== value) {
+      return 0;
+    }
+    const multipliers = {
+      h: 3600,
+      m: 60,
+      s: 1,
+      ms: 0.001,
+      us: 0.000001,
+      ns: 0.000000001,
+    };
+    return matches.reduce((total, match) => total + Number(match[1]) * multipliers[match[2]], 0);
+  }
+
+  function formatRuleDuration(value) {
+    const total = durationSeconds(value);
+    if (!Number.isFinite(total) || total <= 0) {
+      return value;
+    }
+    const minutes = Math.floor(total / 60);
+    const seconds = Math.round(total % 60);
+    if (minutes > 0 && seconds > 0) {
+      return `${minutes} 分 ${seconds} 秒`;
+    }
+    if (minutes > 0) {
+      return `${minutes} 分`;
+    }
+    return `${seconds} 秒`;
+  }
+
   function currentPlayer() {
     return playerByID(app.playerID);
   }
@@ -1031,7 +1253,13 @@
       ["removed from room by the owner", "你已被房主移出房間。"],
       ["new owner must be a connected seated player", "新房主必須是目前在線的玩家。"],
       ["player limit is out of range", "玩家上限必須介於 2 到 20。"],
+      ["player limit cannot be below the configured minimum", "玩家上限不能低於遊戲設定的最低人數。"],
       ["player limit cannot be below", "玩家上限不能低於目前已就座人數。"],
+      ["game preset is invalid", "所選規則預設不存在。"],
+      ["phase duration is invalid", "每個階段必須介於 1 秒到 1 小時，並使用有效時間格式。"],
+      ["minimum players is out of range", "最低玩家人數必須介於 2 到 20。"],
+      ["minimum players cannot exceed", "最低玩家人數不能高於房間玩家上限。"],
+      ["role configuration is invalid", "角色設定不合法：目前固定一名殺手，其他特殊角色各限 0–1 名。"],
       ["room is already waiting", "房間目前已在等待室。"],
       ["target is invalid", "所選目標已失效，請重新選擇。"],
       ["self target is not allowed", "這個能力不能以自己為目標。"],

@@ -131,6 +131,73 @@
     {
       "type": "object",
       "additionalProperties": false,
+      "required": [
+        "type",
+        "night_duration",
+        "day_discussion_duration",
+        "day_voting_duration",
+        "minimum_players",
+        "reveal_roles_on_death",
+        "killers",
+        "detectives",
+        "doctors",
+        "shooters"
+      ],
+      "properties": {
+        "type": { "const": "set_game_settings" },
+        "night_duration": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "day_discussion_duration": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "day_voting_duration": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "minimum_players": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 20
+        },
+        "reveal_roles_on_death": { "type": "boolean" },
+        "killers": { "const": 1 },
+        "detectives": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "doctors": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "shooters": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "preset"],
+      "properties": {
+        "type": { "const": "set_game_preset" },
+        "preset": {
+          "enum": ["STANDARD", "QUICK", "BEGINNER", "MINIMAL"]
+        }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
       "required": ["type"],
       "properties": {
         "type": { "const": "return_to_waiting" }

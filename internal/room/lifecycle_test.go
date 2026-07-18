@@ -246,6 +246,18 @@ func TestReturnToWaitingResetsGameAndStartsRematch(t *testing.T) {
 	if _, err := state.Apply(Event{Type: EventSetRoomLocked, PlayerID: "owner", Locked: true}); err != nil {
 		t.Fatalf("lock room: %v", err)
 	}
+	if _, err := state.Apply(Event{
+		Type:       EventSetGamePreset,
+		PlayerID:   "owner",
+		GamePreset: GamePresetMinimal,
+	}); err != nil {
+		t.Fatalf("set game preset: %v", err)
+	}
+	for _, playerID := range []string{"guest-1", "guest-2"} {
+		if _, err := state.Apply(Event{Type: EventReady, PlayerID: playerID, Ready: true}); err != nil {
+			t.Fatalf("ready %s after settings change: %v", playerID, err)
+		}
+	}
 	if _, err := state.Apply(Event{Type: EventStartGame, PlayerID: "owner"}); err != nil {
 		t.Fatalf("start game: %v", err)
 	}
@@ -295,6 +307,9 @@ func TestReturnToWaitingResetsGameAndStartsRematch(t *testing.T) {
 	}
 	if reset.State.Locked || reset.State.MaxPlayers != 4 {
 		t.Fatalf("room options after reset locked/max = %t/%d, want false/4", reset.State.Locked, reset.State.MaxPlayers)
+	}
+	if reset.State.GameSettings.Preset != GamePresetMinimal {
+		t.Fatalf("game settings after reset = %#v, want minimal preset", reset.State.GameSettings)
 	}
 	if _, ok := state.players["guest-2"]; ok {
 		t.Fatal("disconnected player survived room reset")
