@@ -138,6 +138,7 @@ func TestDecodeClientEventMapsGameSettings(t *testing.T) {
 		"night_duration":"45s",
 		"day_discussion_duration":"2m",
 		"day_voting_duration":"30s",
+		"last_words_duration":"20s",
 		"minimum_players":4,
 		"reveal_roles_on_death":true,
 		"killers":1,
@@ -156,6 +157,7 @@ func TestDecodeClientEventMapsGameSettings(t *testing.T) {
 		settings.NightDuration != "45s" ||
 		settings.DayDiscussionDuration != "2m" ||
 		settings.DayVotingDuration != "30s" ||
+		settings.LastWordsDuration != "20s" ||
 		settings.MinimumPlayers != 4 ||
 		!settings.RevealRolesOnDeath ||
 		settings.Roles != (room.RoleConfiguration{Killers: 1, Detectives: 1, Escorts: 1, Shooters: 1}) {

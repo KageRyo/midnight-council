@@ -191,12 +191,67 @@ func TestVoteExecutionCanFinishGame(t *testing.T) {
 		t.Fatalf("detective vote: %v", err)
 	}
 
-	if envelope.State.Phase != PhaseFinished {
-		t.Fatalf("phase = %s, want %s", envelope.State.Phase, PhaseFinished)
+	if envelope.State.Phase != PhaseLastWords || envelope.State.LastWordsID != "killer" {
+		t.Fatalf("phase/last words = %s/%s, want %s/killer", envelope.State.Phase, envelope.State.LastWordsID, PhaseLastWords)
 	}
-	if envelope.State.Result == nil || envelope.State.Result.Winner != WinnerVillagers {
-		t.Fatalf("result = %#v, want villagers win", envelope.State.Result)
+	if envelope.State.Result != nil || envelope.State.PhaseDeadline == nil {
+		t.Fatalf("result/deadline during last words = %#v/%v", envelope.State.Result, envelope.State.PhaseDeadline)
 	}
+	if got := envelope.State.PhaseDeadline.Sub(envelope.State.PhaseStartedAt); got != DefaultLastWordsDuration {
+		t.Fatalf("last words duration = %s, want %s", got, DefaultLastWordsDuration)
+	}
+	assertLogContains(t, envelope.State.Log, LogLastWordsStarted, "")
+	if _, err := state.Apply(Event{Type: EventChat, PlayerID: "owner", Message: "not my turn"}); !errors.Is(err, ErrLastWordsSpeakerOnly) {
+		t.Fatalf("non-speaker chat err = %v, want %v", err, ErrLastWordsSpeakerOnly)
+	}
+	chat, err := state.Apply(Event{Type: EventChat, PlayerID: "killer", Message: "my last words"})
+	if err != nil || chat.Chat == nil || chat.Chat.Message != "my last words" {
+		t.Fatalf("speaker chat = %#v, err = %v", chat, err)
+	}
+
+	finished, err := state.Apply(Event{Type: EventPhaseTimeout, At: *envelope.State.PhaseDeadline})
+	if err != nil {
+		t.Fatalf("finish last words: %v", err)
+	}
+	if finished.State.Phase != PhaseFinished || finished.State.LastWordsID != "" {
+		t.Fatalf("finished phase/last words = %s/%s", finished.State.Phase, finished.State.LastWordsID)
+	}
+	if finished.State.Result == nil || finished.State.Result.Winner != WinnerVillagers {
+		t.Fatalf("result = %#v, want villagers win", finished.State.Result)
+	}
+}
+
+func TestLastWordsTimeoutStartsNextNightWhenGameContinues(t *testing.T) {
+	state := gameStateWithRoles(PhaseDayVoting, map[string]Role{
+		"owner":     RoleVillager,
+		"killer":    RoleKiller,
+		"detective": RoleDetective,
+		"doctor":    RoleDoctor,
+	})
+	state.phaseDurations = DefaultPhaseDurations()
+	for playerID, targetID := range map[string]string{
+		"owner":     "doctor",
+		"killer":    "doctor",
+		"detective": "doctor",
+		"doctor":    "killer",
+	} {
+		envelope, err := state.Apply(Event{Type: EventVote, PlayerID: playerID, TargetID: targetID})
+		if err != nil {
+			t.Fatalf("vote by %s: %v", playerID, err)
+		}
+		if envelope.State.Phase == PhaseLastWords {
+			deadline := *envelope.State.PhaseDeadline
+			next, err := state.Apply(Event{Type: EventPhaseTimeout, At: deadline})
+			if err != nil {
+				t.Fatalf("finish last words: %v", err)
+			}
+			if next.State.Phase != PhaseNight || next.State.Round != 2 || next.State.LastWordsID != "" {
+				t.Fatalf("phase/round/last words = %s/%d/%s", next.State.Phase, next.State.Round, next.State.LastWordsID)
+			}
+			return
+		}
+	}
+	t.Fatal("votes did not enter last words")
 }
 
 func TestShooterCanEndGame(t *testing.T) {
@@ -287,6 +342,7 @@ func TestStartGamePublishesServerAuthoritativeNightDeadline(t *testing.T) {
 		Night:         45 * time.Second,
 		DayDiscussion: time.Minute,
 		DayVoting:     30 * time.Second,
+		LastWords:     20 * time.Second,
 	}
 	state.gameSettings = StandardGameSettings(state.phaseDurations)
 	startedAt := time.Date(2030, time.January, 2, 3, 4, 5, 0, time.UTC)
@@ -450,11 +506,20 @@ func TestVotingTimeoutPreservesSubmittedVotesAndAbstainsOnlyMissingPlayers(t *te
 	if state.players["detective"].Alive {
 		t.Fatal("submitted vote was replaced instead of being counted")
 	}
-	if envelope.State.Phase != PhaseFinished {
-		t.Fatalf("phase = %s, want %s after execution produces killer parity", envelope.State.Phase, PhaseFinished)
+	if envelope.State.Phase != PhaseLastWords || envelope.State.LastWordsID != "detective" {
+		t.Fatalf("phase/last words = %s/%s, want %s/detective", envelope.State.Phase, envelope.State.LastWordsID, PhaseLastWords)
 	}
 	assertLogContains(t, envelope.State.Log, LogPhaseTimedOut, PhaseDayVoting)
 	assertLogContains(t, envelope.State.Log, LogPlayerExecuted, "")
+
+	finished, err := state.Apply(Event{Type: EventPhaseTimeout, At: *envelope.State.PhaseDeadline})
+	if err != nil {
+		t.Fatalf("expire last words: %v", err)
+	}
+	if finished.State.Phase != PhaseFinished || finished.State.Result == nil || finished.State.Result.Winner != WinnerKillers {
+		t.Fatalf("finished state = %#v", finished.State)
+	}
+	assertLogContains(t, finished.State.Log, LogPhaseTimedOut, PhaseLastWords)
 }
 
 func TestFinishedPhaseClearsDeadline(t *testing.T) {
@@ -533,6 +598,7 @@ func timedGameState(phase Phase, roles map[string]Role) (*State, time.Time) {
 		Night:         30 * time.Second,
 		DayDiscussion: time.Minute,
 		DayVoting:     20 * time.Second,
+		LastWords:     15 * time.Second,
 	}
 	startedAt := time.Date(2031, time.February, 3, 4, 5, 6, 0, time.UTC)
 	state.enterPhase(phase, startedAt)

@@ -2,7 +2,7 @@
 
 Midnight Council is a browser-based, real-time social deduction game prototype inspired by classic night-and-day party games.
 
-The Go server and its embedded web client already support a repeatable playable loop: nickname-based player or spectator join, room readiness and administration, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, win detection, settlement, return to waiting, rematches, and reconnect-token based disconnect/reconnect.
+The Go server and its embedded web client already support a repeatable playable loop: nickname-based player or spectator join, room readiness and administration, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, timed last words, win detection, settlement, return to waiting, rematches, and reconnect-token based disconnect/reconnect.
 
 ## Current Scope
 
@@ -22,6 +22,7 @@ The Go server and its embedded web client already support a repeatable playable 
 - Server-authoritative phase deadlines and automatic progression
 - Night actions and pass events
 - Day voting and execution
+- Timed last words with speaker-only chat after vote execution
 - Shooter one-shot day action
 - Win detection and game result reveal
 - Reconnect token for existing player seats
@@ -88,11 +89,12 @@ Active game phases have server-authoritative deadlines. These process values see
 | `NIGHT_DURATION` | `1m30s` | Night actions |
 | `DAY_DISCUSSION_DURATION` | `5m` | Public discussion |
 | `DAY_VOTING_DURATION` | `1m` | Voting |
+| `LAST_WORDS_DURATION` | `30s` | Executed player's last words |
 
 All phase durations must be positive Go duration strings. For a fast local timing check:
 
 ```bash
-NIGHT_DURATION=10s DAY_DISCUSSION_DURATION=15s DAY_VOTING_DURATION=10s make run
+NIGHT_DURATION=10s DAY_DISCUSSION_DURATION=15s DAY_VOTING_DURATION=10s LAST_WORDS_DURATION=8s make run
 ```
 
 Every WebSocket connection has separate token buckets for chat and game events. Valid events that exceed a bucket are rejected before they reach the room actor. Defaults and overrides are:
@@ -139,6 +141,7 @@ The client supports:
 - private role and investigation displays
 - role-aware night actions and passing
 - public discussion, voting, abstaining, and shooter actions
+- timed last-words view with speaker-only chat controls
 - public game log and final role reveal
 - reconnect-token recovery after refresh
 - automatic recovery after temporary live-connection loss
@@ -202,6 +205,7 @@ The server broadcasts envelopes:
       "night_duration": "1m30s",
       "day_discussion_duration": "5m0s",
       "day_voting_duration": "1m0s",
+      "last_words_duration": "30s",
       "minimum_players": 2,
       "reveal_roles_on_death": false,
       "roles": {
@@ -324,6 +328,7 @@ Set complete custom game settings:
   "night_duration": "45s",
   "day_discussion_duration": "2m",
   "day_voting_duration": "45s",
+  "last_words_duration": "20s",
   "minimum_players": 4,
   "reveal_roles_on_death": true,
   "killers": 1,
@@ -345,7 +350,8 @@ Set complete custom game settings:
 7. If no side has won, the room enters `DAY_DISCUSSION`.
 8. The owner sends `start_vote`, or the discussion deadline starts voting automatically.
 9. Alive players vote. The server resolves execution when everyone has voted; missing votes become abstentions at the voting deadline.
-10. The server either finishes the game or starts the next night.
+10. When voting executes a player, the room enters timed `LAST_WORDS`; only that player may use public chat.
+11. At the last-words deadline, the server either finishes the game or starts the next night. A tied or empty vote skips last words.
 11. The owner can return the room to `WAITING`; connected seats remain, game-only state is cleared, and players ready for the next match.
 
 Win rules:

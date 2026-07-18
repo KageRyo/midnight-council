@@ -45,6 +45,7 @@ var (
 	ErrPhaseDeadlineNotReached = errors.New("phase deadline has not been reached")
 	ErrParticipantTypeMismatch = errors.New("participant type does not match the existing seat")
 	ErrSpectatorCannotChat     = errors.New("spectators cannot chat during an active game")
+	ErrLastWordsSpeakerOnly    = errors.New("only the executed player can speak during last words")
 	ErrParticipantNotFound     = errors.New("participant not found")
 	ErrCannotKickOwner         = errors.New("the room owner cannot be kicked")
 	ErrKickNotAllowed          = errors.New("participants can only be kicked while waiting or after a game")
@@ -75,6 +76,7 @@ type State struct {
 	nightActions   map[string]NightAction
 	votes          map[string]string
 	investigations map[string][]InvestigationResult
+	lastWordsID    string
 	result         *GameResult
 	log            []LogEntry
 	updatedAt      time.Time
@@ -253,6 +255,7 @@ func (s *State) Snapshot() Snapshot {
 		MaxPlayers:     s.maxPlayers,
 		GameSettings:   s.gameSettings,
 		GamePresets:    GamePresetCatalog(s.baseDurations),
+		LastWordsID:    s.lastWordsID,
 		Result:         s.result,
 		Log:            entries,
 		UpdatedAt:      s.updatedAt,
@@ -545,6 +548,7 @@ func (s *State) applyStartGame(event Event) (*Envelope, error) {
 	s.nightActions = make(map[string]NightAction)
 	s.votes = make(map[string]string)
 	s.investigations = make(map[string][]InvestigationResult)
+	s.lastWordsID = ""
 	s.result = nil
 	s.log = nil
 	s.appendLog(LogGameStarted, event.At, LogEntry{PlayerID: event.PlayerID})
@@ -557,7 +561,10 @@ func (s *State) applyChat(event Event) (*Envelope, error) {
 	player, ok := s.players[event.PlayerID]
 	name := ""
 	if ok {
-		if s.phase != PhaseWaiting && s.phase != PhaseFinished && !player.Alive {
+		if s.phase == PhaseLastWords && player.ID != s.lastWordsID {
+			return nil, ErrLastWordsSpeakerOnly
+		}
+		if s.phase != PhaseWaiting && s.phase != PhaseFinished && s.phase != PhaseLastWords && !player.Alive {
 			return nil, ErrPlayerDead
 		}
 		name = player.Name
@@ -893,6 +900,7 @@ func (s *State) applyReturnToWaiting(event Event) (*Envelope, error) {
 	s.nightActions = make(map[string]NightAction)
 	s.votes = make(map[string]string)
 	s.investigations = make(map[string][]InvestigationResult)
+	s.lastWordsID = ""
 	s.result = nil
 	s.log = nil
 	s.touch(event.At)
@@ -931,6 +939,8 @@ func (s *State) applyPhaseTimeout(event Event) (*Envelope, error) {
 			}
 		}
 		s.resolveVote(event.At)
+	case PhaseLastWords:
+		s.completeLastWords(event.At)
 	default:
 		return nil, ErrWrongPhase
 	}
@@ -999,11 +1009,13 @@ func (s *State) resolveVote(at time.Time) {
 	}
 
 	targetID, tied := topVoteTarget(tallies)
+	executedID := ""
 	if targetID == "" || tied {
 		s.appendLog(LogVoteNoExecution, at, LogEntry{})
 	} else {
 		if target, ok := s.players[targetID]; ok && target.Alive {
 			target.Alive = false
+			executedID = target.ID
 			s.appendLog(LogPlayerExecuted, at, LogEntry{TargetID: target.ID})
 		} else {
 			s.appendLog(LogVoteNoExecution, at, LogEntry{})
@@ -1011,6 +1023,21 @@ func (s *State) resolveVote(at time.Time) {
 	}
 
 	s.votes = make(map[string]string)
+	if executedID != "" {
+		s.lastWordsID = executedID
+		s.enterPhase(PhaseLastWords, at)
+		s.appendLog(LogLastWordsStarted, at, LogEntry{TargetID: executedID})
+		return
+	}
+	s.advanceAfterDay(at)
+}
+
+func (s *State) completeLastWords(at time.Time) {
+	s.lastWordsID = ""
+	s.advanceAfterDay(at)
+}
+
+func (s *State) advanceAfterDay(at time.Time) {
 	if s.checkWin(at) {
 		return
 	}

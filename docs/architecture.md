@@ -101,32 +101,36 @@ When a room has no subscribers, its idle timer starts. The default is 30 minutes
 
 ## State Model
 
-The room state machine has five phases:
+The room state machine has six phases:
 
 ```text
 WAITING
    │ owner starts after all non-owners are ready
    ▼
-NIGHT ────────────────┐
-   │ all actions or   │
-   │ night deadline   │
-   ▼                  │
-DAY_DISCUSSION        │
-   │ owner or deadline│
-   ▼                  │
-DAY_VOTING ───────────┘
+NIGHT
+   │ all actions or night deadline
+   ├──────────────────────────────► FINISHED when a win condition is met
+   ▼
+DAY_DISCUSSION
+   │ owner or deadline
+   ▼
+DAY_VOTING
    │ all votes or deadline
-   │
-   └──────────────► FINISHED when a win condition is met
-                           │
-                           └── owner return-to-waiting ──► WAITING
+   ├── no execution ──────────────► next NIGHT
+   ▼ execution
+LAST_WORDS
+   │ last-words deadline
+   ├──────────────────────────────► next NIGHT
+   └──────────────────────────────► FINISHED when a win condition is met
+
+FINISHED ── owner return-to-waiting ──► WAITING
 ```
 
-`State.Apply` is the only game-state mutation entrypoint. It validates phase, ownership, life state, role, targets, and early timeout attempts before applying an event. Night and voting phases resolve when every required living player submits or when their deadlines expire. Discussion moves to voting when its deadline expires.
+`State.Apply` is the only game-state mutation entrypoint. It validates phase, ownership, life state, role, targets, and early timeout attempts before applying an event. Night and voting phases resolve when every required living player submits or when their deadlines expire. Discussion moves to voting when its deadline expires. A successful vote execution enters `LAST_WORDS`, publishes the executed player ID, and delays win evaluation until that deadline; a tied or empty vote skips the phase.
 
-At timeout, missing night actions become passes and missing votes become abstentions. Timeout transitions append a public `phase_timed_out` log entry before normal resolution logs. Waiting and finished phases have no deadline.
+At timeout, missing night actions become passes and missing votes become abstentions. A last-words timeout clears the speaker and evaluates the win condition before starting another night. Timeout transitions append a public `phase_timed_out` log entry before normal resolution logs. Waiting and finished phases have no deadline.
 
-Default durations are 90 seconds for night, five minutes for discussion, and 60 seconds for voting. `NIGHT_DURATION`, `DAY_DISCUSSION_DURATION`, and `DAY_VOTING_DURATION` override the process values used by each new room's `STANDARD` preset; non-positive startup values are rejected.
+Default durations are 90 seconds for night, five minutes for discussion, 60 seconds for voting, and 30 seconds for last words. `NIGHT_DURATION`, `DAY_DISCUSSION_DURATION`, `DAY_VOTING_DURATION`, and `LAST_WORDS_DURATION` override the process values used by each new room's `STANDARD` preset; non-positive startup values are rejected.
 
 Roles are shuffled using `crypto/rand`. Reconnect tokens and subscription IDs also use cryptographically secure randomness.
 
@@ -136,7 +140,7 @@ Role capabilities live in `internal/room/rules.go` as a rule-set registry. Each 
 
 Every room owns a public `game_settings` value and a server-defined `game_presets` catalog. The built-in presets are `STANDARD`, `QUICK`, `BEGINNER`, `ADVANCED`, and `MINIMAL`; arbitrary client-supplied preset definitions are not trusted. Owners may apply a preset or submit a complete custom configuration only in `WAITING` or `FINISHED`.
 
-Settings contain the three phase durations, minimum player count, whether eliminated roles become public immediately, and role counts. Custom durations must be valid Go duration strings between one second and one hour. Minimum players must be from 2 through 20 and cannot exceed the room's player cap; conversely, the cap cannot be lowered below the configured minimum.
+Settings contain the four timed phase durations, minimum player count, whether eliminated roles become public immediately, and role counts. Custom durations must be valid Go duration strings between one second and one hour. Minimum players must be from 2 through 20 and cannot exceed the room's player cap; conversely, the cap cannot be lowered below the configured minimum.
 
 The current rules engine requires exactly one killer and permits zero or one detective, doctor, escort, and shooter. This constraint prevents the configuration UI from exposing role combinations whose team knowledge or night resolution is not implemented yet. At start, enabled special roles are added in killer, detective, doctor, escort, shooter order while reserving at least one seat for a villager; every remaining seat becomes a villager. The server validates the full configuration again before accepting it.
 
@@ -159,7 +163,7 @@ Every state broadcast consists of:
 
 Before the game ends, public player views omit roles. A player's private view may include their role, reconnect token, currently available events, vote state, shooter availability, and detective investigations. A spectator private view contains only its identity, reconnect token, and spectator marker. At `FINISHED`, roles are copied into the public player list.
 
-Public snapshots include player and spectator lists, owner ID, lock state, player cap, current settings, the authoritative preset catalog, `phase_started_at`, an optional `phase_deadline`, and `server_time`. The browser uses `server_time` only to compensate for client clock skew when rendering the deadline. It never advances a phase locally.
+Public snapshots include player and spectator lists, owner ID, lock state, player cap, current settings, the authoritative preset catalog, `phase_started_at`, an optional `phase_deadline`, optional `last_words_player_id`, and `server_time`. The browser uses `server_time` only to compensate for client clock skew when rendering the deadline. It never advances a phase locally.
 
 This projection boundary is a core invariant: hidden state must remain in `internal/room` and must never be derived or trusted from the client.
 
@@ -184,9 +188,9 @@ PostgreSQL, Redis, and multi-instance routing belong behind these boundaries rat
 ## Test Boundaries
 
 - `internal/protocol`: malformed JSON and event-shape validation;
-- `internal/room`: state-machine rules, setting and role-pool validation, room lifecycle, spectator isolation, timeout semantics, actor timer cancellation, private projections, sequence deduplication, single-subscription enforcement, reconnect, and idle cleanup;
+- `internal/room`: state-machine rules, setting and role-pool validation, room lifecycle, spectator isolation, last-words authorization, timeout semantics, actor timer cancellation, private projections, sequence deduplication, single-subscription enforcement, reconnect, and idle cleanup;
 - `internal/moderation`: default allow policy and chat policy contract;
-- `internal/ws`: real WebSocket multiplayer flow, room administration, spectator connections, terminal replacement, network-versus-explicit disconnect, acknowledgements, rate-limit ordering, moderation decisions, automatic phase broadcasts, and transport errors;
+- `internal/ws`: real WebSocket multiplayer flow, room administration, spectator connections, terminal replacement, network-versus-explicit disconnect, acknowledgements, rate-limit ordering, moderation decisions, last-words chat enforcement, automatic phase broadcasts, and transport errors;
 - `internal/webui`: embedded asset routing, reconnect and presence source checks, deadline-consumption checks, content types, method handling, and security headers.
 
 Run the full suite with `make test`.

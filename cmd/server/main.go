@@ -22,6 +22,7 @@ func main() {
 		Night:         getenvDuration("NIGHT_DURATION", room.DefaultNightDuration),
 		DayDiscussion: getenvDuration("DAY_DISCUSSION_DURATION", room.DefaultDayDiscussionDuration),
 		DayVoting:     getenvDuration("DAY_VOTING_DURATION", room.DefaultDayVotingDuration),
+		LastWords:     getenvDuration("LAST_WORDS_DURATION", room.DefaultLastWordsDuration),
 	}
 	if err := phaseDurations.Validate(); err != nil {
 		log.Fatalf("invalid phase duration configuration: %v", err)
@@ -62,12 +63,13 @@ func main() {
 
 	go func() {
 		log.Printf(
-			"midnight-council game server listening on %s with room idle timeout %s, phase durations night=%s discussion=%s voting=%s, and WebSocket rate limits chat=%g/s burst=%d game=%g/s burst=%d",
+			"midnight-council game server listening on %s with room idle timeout %s, phase durations night=%s discussion=%s voting=%s last_words=%s, and WebSocket rate limits chat=%g/s burst=%d game=%g/s burst=%d",
 			addr,
 			roomIdleTimeout,
 			phaseDurations.Night,
 			phaseDurations.DayDiscussion,
 			phaseDurations.DayVoting,
+			phaseDurations.LastWords,
 			rateLimits.Chat.EventsPerSecond,
 			rateLimits.Chat.Burst,
 			rateLimits.Game.EventsPerSecond,

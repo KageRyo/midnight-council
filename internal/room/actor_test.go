@@ -11,6 +11,7 @@ func TestActorAutomaticallyAdvancesExpiredPhases(t *testing.T) {
 		Night:         40 * time.Millisecond,
 		DayDiscussion: 40 * time.Millisecond,
 		DayVoting:     40 * time.Millisecond,
+		LastWords:     40 * time.Millisecond,
 	}
 	actor := newActor("timed-room", 15*time.Millisecond, durations, nil)
 	ctx := context.Background()
@@ -55,6 +56,7 @@ func TestActorCancelsPreviousPhaseTimerAfterManualTransition(t *testing.T) {
 		Night:         20 * time.Millisecond,
 		DayDiscussion: 80 * time.Millisecond,
 		DayVoting:     500 * time.Millisecond,
+		LastWords:     500 * time.Millisecond,
 	}
 	actor := newActor("timer-reset-room", 15*time.Millisecond, durations, nil)
 	ctx := context.Background()

@@ -32,7 +32,9 @@ type wireEnvelope struct {
 }
 
 func TestHandlerPlaysFullGameOverWebSocket(t *testing.T) {
-	server := httptest.NewServer(NewHandler(room.NewHub()))
+	durations := room.DefaultPhaseDurations()
+	durations.LastWords = 500 * time.Millisecond
+	server := httptest.NewServer(NewHandler(room.NewHub(room.WithPhaseDurations(durations))))
 	defer server.Close()
 
 	clients := []*testClient{
@@ -104,6 +106,24 @@ func TestHandlerPlaysFullGameOverWebSocket(t *testing.T) {
 		}
 		writeClientEvent(t, client, map[string]any{"type": "vote", "target_id": targetID})
 	}
+	lastWords := readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return state.Phase == room.PhaseLastWords
+	})
+	if lastWords.State.LastWordsID != killer.id || lastWords.State.PhaseDeadline == nil {
+		t.Fatalf("last words state = %#v", lastWords.State)
+	}
+	observer := clients[0]
+	if observer.id == killer.id {
+		observer = clients[1]
+	}
+	writeClientEvent(t, observer, map[string]any{"type": "chat", "message": "interrupt"})
+	readEnvelopeUntil(t, observer, func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && envelope.Error == room.ErrLastWordsSpeakerOnly.Error()
+	})
+	writeClientEvent(t, killer, map[string]any{"type": "chat", "message": "last words"})
+	readEnvelopeUntil(t, killer, func(envelope wireEnvelope) bool {
+		return envelope.Type == "chat" && envelope.Chat != nil && envelope.Chat.Message == "last words"
+	})
 
 	finished := readStateUntil(t, clients[0], func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
 		return state.Phase == room.PhaseFinished
@@ -268,6 +288,7 @@ func TestHandlerBroadcastsAutomaticPhaseProgression(t *testing.T) {
 		Night:         60 * time.Millisecond,
 		DayDiscussion: 80 * time.Millisecond,
 		DayVoting:     60 * time.Millisecond,
+		LastWords:     60 * time.Millisecond,
 	}
 	server := httptest.NewServer(NewHandler(room.NewHub(room.WithPhaseDurations(durations))))
 	defer server.Close()
@@ -626,6 +647,7 @@ func TestHandlerSupportsServerValidatedGameSettings(t *testing.T) {
 		"night_duration":          "30s",
 		"day_discussion_duration": "40s",
 		"day_voting_duration":     "30s",
+		"last_words_duration":     "15s",
 		"minimum_players":         4,
 		"reveal_roles_on_death":   true,
 		"killers":                 1,
@@ -647,6 +669,7 @@ func TestHandlerSupportsServerValidatedGameSettings(t *testing.T) {
 		"night_duration":          "30s",
 		"day_discussion_duration": "40s",
 		"day_voting_duration":     "30s",
+		"last_words_duration":     "15s",
 		"minimum_players":         3,
 		"reveal_roles_on_death":   false,
 		"killers":                 2,

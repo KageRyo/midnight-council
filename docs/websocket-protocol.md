@@ -74,6 +74,7 @@ The server sends one of four envelope types.
       "night_duration": "1m30s",
       "day_discussion_duration": "5m0s",
       "day_voting_duration": "1m0s",
+      "last_words_duration": "30s",
       "minimum_players": 2,
       "reveal_roles_on_death": false,
       "roles": {
@@ -110,7 +111,7 @@ Player and spectator entries expose `connected` and `afk`. A disconnect clears A
 
 `available` describes events the UI may offer, but it is not authorization: the server validates the current state again when an event arrives.
 
-`phase_started_at` identifies the current phase transition. `phase_deadline` is present for `NIGHT`, `DAY_DISCUSSION`, and `DAY_VOTING`, and omitted for `WAITING` and `FINISHED`. `server_time` is generated with each snapshot so clients can display the absolute deadline without trusting their local clock. `updated_at` remains the time of the most recent room event and can therefore be older than `server_time` on a new subscription.
+`phase_started_at` identifies the current phase transition. `phase_deadline` is present for `NIGHT`, `DAY_DISCUSSION`, `DAY_VOTING`, and `LAST_WORDS`, and omitted for `WAITING` and `FINISHED`. During `LAST_WORDS`, `last_words_player_id` identifies the executed player who alone may send chat; the field is omitted in every other phase. `server_time` is generated with each snapshot so clients can display the absolute deadline without trusting their local clock. `updated_at` remains the time of the most recent room event and can therefore be older than `server_time` on a new subscription.
 
 ### Chat
 
@@ -128,6 +129,8 @@ Player and spectator entries expose `connected` and `afk`. A disconnect clears A
 ```
 
 Chat envelopes are not retained in room snapshots.
+
+Chat is available to players and spectators while waiting or finished, and to living players during normal active phases. During `LAST_WORDS`, the executed player identified by `last_words_player_id` is the only permitted speaker; living players, other eliminated players, and spectators can only receive the broadcast.
 
 ### Acknowledgement
 
@@ -203,6 +206,7 @@ A custom replacement must provide every field:
   "night_duration": "45s",
   "day_discussion_duration": "2m",
   "day_voting_duration": "45s",
+  "last_words_duration": "20s",
   "minimum_players": 4,
   "reveal_roles_on_death": true,
   "killers": 1,
@@ -213,7 +217,7 @@ A custom replacement must provide every field:
 }
 ```
 
-Durations use Go duration syntax and must be between one second and one hour. Minimum players must be from 2 through 20 and no greater than `max_players`. The current engine requires exactly one killer; detective, doctor, escort, and shooter counts must each be zero or one. Enabled roles are used in that order while reserving one villager seat, then all remaining players become villagers.
+All four durations use Go duration syntax and must be between one second and one hour. Minimum players must be from 2 through 20 and no greater than `max_players`. The current engine requires exactly one killer; detective, doctor, escort, and shooter counts must each be zero or one. Enabled roles are used in that order while reserving one villager seat, then all remaining players become villagers.
 
 `ESCORT` submits the same `night_action` event as other night roles but cannot target itself. Night resolution follows the role registry's priority: escort block, doctor protection, killer attack, then detective investigation. A blocked player's action is ignored for that night. `ADVANCED` enables one escort and requires six players so every current special role can enter the deck while retaining a villager.
 
@@ -228,27 +232,28 @@ Both setting events are owner-only and accepted only in `WAITING` or `FINISHED`.
 - Spectators may join any phase when unlocked. They cannot ready, vote, receive a role, perform actions, or chat during active play.
 - Kicking is restricted to `WAITING` and `FINISHED`; the owner cannot kick their own seat.
 - Network-disconnected identities remain visible and reconnectable; public AFK is independent of transport connection state.
+- A vote execution enters timed `LAST_WORDS`; win evaluation waits until its deadline, while a tied or empty vote skips directly to the next night.
 - `return_to_waiting` is owner-only and valid from active or finished phases. It removes disconnected identities and clears all game-only state while preserving connected participants, reconnect tokens, room lock, and player cap.
 
 ## Phase/Event Matrix
 
-| Event | `WAITING` | `NIGHT` | `DAY_DISCUSSION` | `DAY_VOTING` | `FINISHED` |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `ready` | yes | no | no | no | no |
-| `start_game` | owner | no | no | no | no |
-| `chat` | all participants | living players | living players | living players | all participants |
-| `night_action` / `night_pass` | no | eligible living role | no | no | no |
-| `start_vote` | no | no | owner | no | no |
-| `vote` | no | no | no | living | no |
-| `shoot` | no | no | living shooter | living shooter | no |
-| `transfer_owner` | owner | owner | owner | owner | owner |
-| `kick_participant` | owner | no | no | no | owner |
-| `set_room_locked` | owner | owner | owner | owner | owner |
-| `set_player_limit` | owner | no | no | no | owner |
-| `set_game_preset` | owner | no | no | no | owner |
-| `set_game_settings` | owner | no | no | no | owner |
-| `presence` | participant | participant | participant | participant | participant |
-| `return_to_waiting` | no | owner | owner | owner | owner |
+| Event | `WAITING` | `NIGHT` | `DAY_DISCUSSION` | `DAY_VOTING` | `LAST_WORDS` | `FINISHED` |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `ready` | yes | no | no | no | no | no |
+| `start_game` | owner | no | no | no | no | no |
+| `chat` | all participants | living players | living players | living players | executed speaker | all participants |
+| `night_action` / `night_pass` | no | eligible living role | no | no | no | no |
+| `start_vote` | no | no | owner | no | no | no |
+| `vote` | no | no | no | living | no | no |
+| `shoot` | no | no | living shooter | living shooter | no | no |
+| `transfer_owner` | owner | owner | owner | owner | owner | owner |
+| `kick_participant` | owner | no | no | no | no | owner |
+| `set_room_locked` | owner | owner | owner | owner | owner | owner |
+| `set_player_limit` | owner | no | no | no | no | owner |
+| `set_game_preset` | owner | no | no | no | no | owner |
+| `set_game_settings` | owner | no | no | no | no | owner |
+| `presence` | participant | participant | participant | participant | participant | participant |
+| `return_to_waiting` | no | owner | owner | owner | owner | owner |
 
 The state layer remains authoritative for every condition shown in this table.
 
@@ -259,6 +264,7 @@ Phase expiry is an internal room event and is not an accepted client event. The 
 - At the night deadline, every eligible living player without an action receives a pass before normal night resolution.
 - At the discussion deadline, the room enters voting as if voting had started without a player initiator.
 - At the voting deadline, every living player without a vote receives an abstention before normal vote resolution.
+- At the last-words deadline, the speaker is cleared and the server evaluates the delayed win condition before either finishing or starting the next night.
 - A manual transition or early completion replaces the old absolute deadline; the actor cancels its previous timer.
 - A phase timeout received before its current deadline is rejected by the state layer.
 
@@ -273,6 +279,7 @@ State snapshots may contain up to 100 chronological public log entries:
 - `night_no_elimination`
 - `voting_started`
 - `player_executed`
+- `last_words_started`
 - `vote_no_execution`
 - `shooter_fired`
 - `phase_timed_out`

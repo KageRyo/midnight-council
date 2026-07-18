@@ -133,6 +133,7 @@ func TestGameClientSupportsRoomLifecycleControls(t *testing.T) {
 		`id="game-settings-form"`,
 		`id="game-preset-select"`,
 		`id="setting-escort"`,
+		`id="setting-last-words-seconds"`,
 		`id="setting-reveal-roles"`,
 		`id="room-admin-card"`,
 		`id="return-waiting-button"`,
@@ -150,6 +151,8 @@ func TestGameClientSupportsRoomLifecycleControls(t *testing.T) {
 		"set_game_preset",
 		"ESCORT",
 		"ADVANCED",
+		"LAST_WORDS",
+		"last_words_player_id",
 		"return_to_waiting",
 	} {
 		if !strings.Contains(string(app), eventType) {

@@ -79,6 +79,13 @@
       description: "所有存活玩家都必須投票或棄權；倒數結束時，尚未投票者會自動棄權。",
       symbol: "⌁",
     },
+    LAST_WORDS: {
+      label: "遺言",
+      kicker: "LAST WORDS",
+      title: "最後的陳述",
+      description: "被議會處決的玩家可在倒數結束前留下最後發言，其他人只能聆聽。",
+      symbol: "◒",
+    },
     FINISHED: {
       label: "已結束",
       kicker: "FINAL VERDICT",
@@ -96,6 +103,7 @@
     night_no_elimination: "昨夜無人出局",
     voting_started: "表決開始",
     player_executed: "議會執行處決",
+    last_words_started: "遺言開始",
     vote_no_execution: "本輪無人被處決",
     shooter_fired: "槍手開火",
     phase_timed_out: "階段時間結束",
@@ -170,6 +178,7 @@
       "setting-night-seconds",
       "setting-discussion-seconds",
       "setting-voting-seconds",
+      "setting-last-words-seconds",
       "setting-minimum-players",
       "setting-killers",
       "setting-detective",
@@ -734,9 +743,10 @@
     const nightSeconds = integerInput(ui.settingNightSeconds);
     const discussionSeconds = integerInput(ui.settingDiscussionSeconds);
     const votingSeconds = integerInput(ui.settingVotingSeconds);
+    const lastWordsSeconds = integerInput(ui.settingLastWordsSeconds);
     const minimumPlayers = integerInput(ui.settingMinimumPlayers);
     const killers = integerInput(ui.settingKillers);
-    if ([nightSeconds, discussionSeconds, votingSeconds].some((value) => value < 1 || value > 3600)) {
+    if ([nightSeconds, discussionSeconds, votingSeconds, lastWordsSeconds].some((value) => value < 1 || value > 3600)) {
       showToast("每個階段必須介於 1 秒到 1 小時。", true);
       return;
     }
@@ -755,6 +765,7 @@
       night_duration: `${nightSeconds}s`,
       day_discussion_duration: `${discussionSeconds}s`,
       day_voting_duration: `${votingSeconds}s`,
+      last_words_duration: `${lastWordsSeconds}s`,
       minimum_players: minimumPlayers,
       reveal_roles_on_death: ui.settingRevealRoles.checked,
       killers,
@@ -986,7 +997,7 @@
     if (settings.roles?.shooters) enabledRoles.push("槍手");
     enabledRoles.push("其餘為平民");
     ui.gameSettingsSummary.replaceChildren(
-      settingSummaryItem("階段時間", `${formatRuleDuration(settings.night_duration)}／${formatRuleDuration(settings.day_discussion_duration)}／${formatRuleDuration(settings.day_voting_duration)}`),
+      settingSummaryItem("夜／討論／投票／遺言", `${formatRuleDuration(settings.night_duration)}／${formatRuleDuration(settings.day_discussion_duration)}／${formatRuleDuration(settings.day_voting_duration)}／${formatRuleDuration(settings.last_words_duration)}`),
       settingSummaryItem("最低人數", `${settings.minimum_players} 人`),
       settingSummaryItem("角色組合", enabledRoles.join("、")),
       settingSummaryItem("死亡身分", settings.reveal_roles_on_death ? "立即公開" : "結算時公開"),
@@ -1024,6 +1035,7 @@
     ui.settingNightSeconds.value = String(durationSeconds(settings.night_duration));
     ui.settingDiscussionSeconds.value = String(durationSeconds(settings.day_discussion_duration));
     ui.settingVotingSeconds.value = String(durationSeconds(settings.day_voting_duration));
+    ui.settingLastWordsSeconds.value = String(durationSeconds(settings.last_words_duration));
     ui.settingMinimumPlayers.value = String(settings.minimum_players);
     ui.settingKillers.value = String(settings.roles?.killers || 1);
     ui.settingDetective.checked = settings.roles?.detectives === 1;
@@ -1044,6 +1056,7 @@
       ui.settingNightSeconds,
       ui.settingDiscussionSeconds,
       ui.settingVotingSeconds,
+      ui.settingLastWordsSeconds,
       ui.settingMinimumPlayers,
       ui.settingKillers,
       ui.settingDetective,
@@ -1192,6 +1205,13 @@
       ui.phaseDescription.textContent = "你已出局，無法參與表決。等待存活玩家完成投票。";
     }
 
+    if (phase === "LAST_WORDS") {
+      const speaker = playerByID(app.state.last_words_player_id);
+      ui.phaseDescription.textContent = app.state.last_words_player_id === app.playerID
+        ? "你已被議會處決。倒數結束前，公開頻道只接受你的最後發言。"
+        : `${speaker?.name || "被處決者"} 正在留下遺言；其他玩家暫時只能聆聽。`;
+    }
+
     if (app.private?.can_shoot && available("shoot")) {
       ui.shootForm.hidden = false;
       fillPlayerSelect(ui.shootTarget, (player) => player.alive && player.id !== app.playerID);
@@ -1259,6 +1279,8 @@
         return `${playerName || "房主"} 宣布開始表決`;
       case "player_executed":
         return `${targetName || "一名玩家"} 遭議會處決`;
+      case "last_words_started":
+        return `${targetName || "被處決者"} 獲得最後發言時間`;
       case "vote_no_execution":
         return "平票或無有效票數";
       case "shooter_fired":
@@ -1277,14 +1299,20 @@
     const ongoing = !["WAITING", "FINISHED"].includes(app.state.phase);
     const dead = app.private?.alive === false;
     const spectator = app.private?.spectator === true;
-    const disabled = !connected || (ongoing && (dead || spectator));
+    const lastWords = app.state.phase === "LAST_WORDS";
+    const lastWordsSpeaker = lastWords && app.state.last_words_player_id === app.playerID;
+    const disabled = !connected || (ongoing && (spectator || (lastWords ? !lastWordsSpeaker : dead)));
     ui.chatMessage.disabled = disabled;
     ui.chatForm.querySelector("button").disabled = disabled;
     ui.chatHint.textContent = ongoing && spectator
       ? "旁觀者在遊戲結束前無法公開發言。"
-      : ongoing && dead
-        ? "出局玩家在遊戲結束前無法公開發言。"
-        : "";
+      : lastWordsSpeaker
+        ? "這是你的遺言時間；倒數結束後頻道將再次關閉。"
+        : lastWords
+          ? "遺言期間只有被處決者可以公開發言。"
+          : ongoing && dead
+            ? "出局玩家在遊戲結束前無法公開發言。"
+            : "";
   }
 
   function disableGameInputs() {
@@ -1493,6 +1521,7 @@
       ["not enough players", "玩家人數不足，至少需要兩名玩家。"],
       ["action is not allowed", "目前階段無法執行這項操作。"],
       ["player is dead", "你已出局，無法執行這項操作。"],
+      ["only the executed player can speak during last words", "遺言期間只有被處決者可以公開發言。"],
       ["spectators cannot chat", "旁觀者在對局進行中無法公開發言。"],
       ["participant type does not match", "保存的席次類型不符；已清除本機舊資料，請重新加入。"],
       ["participant not found", "這個席次已不存在。"],

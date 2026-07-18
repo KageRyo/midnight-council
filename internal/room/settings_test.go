@@ -84,6 +84,7 @@ func TestGamePresetCatalogContainsServerAuthoritativePresets(t *testing.T) {
 		Night:         75 * time.Second,
 		DayDiscussion: 4 * time.Minute,
 		DayVoting:     50 * time.Second,
+		LastWords:     30 * time.Second,
 	}
 	catalog := GamePresetCatalog(base)
 	if len(catalog) != 5 {
@@ -111,6 +112,7 @@ func TestServerStandardPresetCanUsePositiveSubsecondTestDurations(t *testing.T) 
 		Night:         30 * time.Millisecond,
 		DayDiscussion: 40 * time.Millisecond,
 		DayVoting:     20 * time.Millisecond,
+		LastWords:     25 * time.Millisecond,
 	}
 	settings := StandardGameSettings(base)
 	if _, err := settings.Validate(DefaultMaxPlayers); !errors.Is(err, ErrInvalidPhaseDuration) {
@@ -177,6 +179,7 @@ func TestOwnerCanUpdateGameSettingsAndReadinessResets(t *testing.T) {
 		NightDuration:         "30s",
 		DayDiscussionDuration: "90s",
 		DayVotingDuration:     "20s",
+		LastWordsDuration:     "15s",
 		MinimumPlayers:        4,
 		RevealRolesOnDeath:    true,
 		Roles: RoleConfiguration{
@@ -197,6 +200,7 @@ func TestOwnerCanUpdateGameSettingsAndReadinessResets(t *testing.T) {
 	}
 	if envelope.State.GameSettings.Preset != GamePresetCustom ||
 		envelope.State.GameSettings.NightDuration != "30s" ||
+		envelope.State.GameSettings.LastWordsDuration != "15s" ||
 		!envelope.State.GameSettings.RevealRolesOnDeath {
 		t.Fatalf("published settings = %#v", envelope.State.GameSettings)
 	}

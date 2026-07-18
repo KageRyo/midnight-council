@@ -9,6 +9,7 @@ const (
 	PhaseNight         Phase = "NIGHT"
 	PhaseDayDiscussion Phase = "DAY_DISCUSSION"
 	PhaseDayVoting     Phase = "DAY_VOTING"
+	PhaseLastWords     Phase = "LAST_WORDS"
 	PhaseFinished      Phase = "FINISHED"
 )
 
@@ -75,6 +76,7 @@ const (
 	LogNightNoElimination LogType = "night_no_elimination"
 	LogVotingStarted      LogType = "voting_started"
 	LogPlayerExecuted     LogType = "player_executed"
+	LogLastWordsStarted   LogType = "last_words_started"
 	LogVoteNoExecution    LogType = "vote_no_execution"
 	LogShooterFired       LogType = "shooter_fired"
 	LogPhaseTimedOut      LogType = "phase_timed_out"
@@ -154,6 +156,7 @@ type Snapshot struct {
 	MaxPlayers     int             `json:"max_players"`
 	GameSettings   GameSettings    `json:"game_settings"`
 	GamePresets    []GameSettings  `json:"game_presets"`
+	LastWordsID    string          `json:"last_words_player_id,omitempty"`
 	Result         *GameResult     `json:"result,omitempty"`
 	Log            []LogEntry      `json:"log,omitempty"`
 	UpdatedAt      time.Time       `json:"updated_at"`

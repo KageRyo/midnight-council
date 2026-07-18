@@ -1041,7 +1041,8 @@ h2 {
 }
 
 .phase-art[data-phase="DAY_DISCUSSION"],
-.phase-art[data-phase="DAY_VOTING"] {
+.phase-art[data-phase="DAY_VOTING"],
+.phase-art[data-phase="LAST_WORDS"] {
   border-color: rgba(232, 187, 104, 0.15);
   background: radial-gradient(circle, rgba(232, 187, 104, 0.14), transparent 69%);
 }

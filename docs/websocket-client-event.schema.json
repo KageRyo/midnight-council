@@ -155,6 +155,7 @@
         "night_duration",
         "day_discussion_duration",
         "day_voting_duration",
+        "last_words_duration",
         "minimum_players",
         "reveal_roles_on_death",
         "killers",
@@ -177,6 +178,11 @@
           "maxLength": 32
         },
         "day_voting_duration": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "last_words_duration": {
           "type": "string",
           "minLength": 1,
           "maxLength": 32

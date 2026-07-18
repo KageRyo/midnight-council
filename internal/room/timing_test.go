@@ -14,22 +14,27 @@ func TestPhaseDurationsValidate(t *testing.T) {
 	}{
 		{
 			name:      "valid",
-			durations: PhaseDurations{Night: time.Second, DayDiscussion: time.Second, DayVoting: time.Second},
+			durations: PhaseDurations{Night: time.Second, DayDiscussion: time.Second, DayVoting: time.Second, LastWords: time.Second},
 		},
 		{
 			name:      "night must be positive",
-			durations: PhaseDurations{DayDiscussion: time.Second, DayVoting: time.Second},
+			durations: PhaseDurations{DayDiscussion: time.Second, DayVoting: time.Second, LastWords: time.Second},
 			wantError: "night duration",
 		},
 		{
 			name:      "discussion must be positive",
-			durations: PhaseDurations{Night: time.Second, DayVoting: time.Second},
+			durations: PhaseDurations{Night: time.Second, DayVoting: time.Second, LastWords: time.Second},
 			wantError: "day discussion duration",
 		},
 		{
 			name:      "voting must be positive",
-			durations: PhaseDurations{Night: time.Second, DayDiscussion: time.Second},
+			durations: PhaseDurations{Night: time.Second, DayDiscussion: time.Second, LastWords: time.Second},
 			wantError: "day voting duration",
+		},
+		{
+			name:      "last words must be positive",
+			durations: PhaseDurations{Night: time.Second, DayDiscussion: time.Second, DayVoting: time.Second},
+			wantError: "last words duration",
 		},
 	}
 

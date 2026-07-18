@@ -53,6 +53,7 @@ It does not calculate kills, vote results, role assignments, or winners locally.
 | `NIGHT` | Role-specific target action or pass; missing actions pass at timeout; living-player chat; spectators observe |
 | `DAY_DISCUSSION` | Owner may start voting early; deadline starts it automatically; shooter may fire; living-player chat; spectators observe |
 | `DAY_VOTING` | Living players vote or abstain; missing votes abstain at timeout; shooter may fire; living-player chat; spectators observe |
+| `LAST_WORDS` | The executed player alone may use public chat until the deadline; everyone else listens |
 | `FINISHED` | Final result and roles; owner may administer or return to waiting; player and spectator chat |
 
 Night actors can change their submitted target until the last required action causes resolution. Voters can similarly change a non-empty vote until the last living player submits. The current private projection cannot distinguish a submitted abstention from no vote, so the UI continues to describe abstention as available until resolution.
@@ -69,7 +70,7 @@ Spectators have a separate identity card and participant list. They never see ro
 
 Every participant sees the current game-setting summary. The owner additionally receives an editor while the room is waiting or finished. The editor can apply the server-provided `STANDARD`, `QUICK`, `BEGINNER`, `ADVANCED`, or `MINIMAL` preset, or switch to `CUSTOM` and choose:
 
-- night, discussion, and voting durations from one second through one hour;
+- night, discussion, voting, and last-words durations from one second through one hour;
 - minimum players, bounded by the room player cap;
 - immediate role reveal when a player is eliminated;
 - one required killer and optional detective, doctor, escort, and shooter slots.
@@ -133,14 +134,14 @@ For a manual multiplayer check:
 2. Ready the non-owner and start from the owner.
 3. Confirm that each browser sees only its own role.
 4. Submit or pass all required night actions.
-5. Exercise discussion, voting, and any available shooter action.
+5. Exercise discussion, voting, last words, and any available shooter action.
 6. Interrupt one live connection and confirm automatic reconnect restores its seat and pending actions are not applied twice.
 7. Join a spectator during the active game and confirm it receives no role or action controls and cannot chat.
 8. Return to waiting and confirm roles, readiness, result, and game log reset while connected identities remain.
 9. Exercise lock, player cap, kick, and ownership transfer controls.
 10. Apply a preset, then a custom rule set; confirm readiness resets, minimum-player gating changes, and the next night uses the selected duration.
 11. Enable death-role reveal and confirm an eliminated role becomes public while living roles remain hidden.
-12. Run with short phase durations and confirm missing actions, discussion, and votes advance automatically.
+12. Run with short phase durations and confirm missing actions, discussion, votes, and last words advance automatically.
 13. Open the same saved seat in a second tab and confirm the first tab is terminally replaced rather than reconnecting.
 14. Hide a tab or wait two minutes and confirm AFK appears separately from disconnected state.
 

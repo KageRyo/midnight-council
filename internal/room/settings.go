@@ -41,6 +41,7 @@ type GameSettings struct {
 	NightDuration         string            `json:"night_duration"`
 	DayDiscussionDuration string            `json:"day_discussion_duration"`
 	DayVotingDuration     string            `json:"day_voting_duration"`
+	LastWordsDuration     string            `json:"last_words_duration"`
 	MinimumPlayers        int               `json:"minimum_players"`
 	RevealRolesOnDeath    bool              `json:"reveal_roles_on_death"`
 	Roles                 RoleConfiguration `json:"roles"`
@@ -52,6 +53,7 @@ func StandardGameSettings(durations PhaseDurations) GameSettings {
 		NightDuration:         durations.Night.String(),
 		DayDiscussionDuration: durations.DayDiscussion.String(),
 		DayVotingDuration:     durations.DayVoting.String(),
+		LastWordsDuration:     durations.LastWords.String(),
 		MinimumPlayers:        MinPlayersToStart,
 		Roles: RoleConfiguration{
 			Killers:    1,
@@ -72,6 +74,7 @@ func GameSettingsForPreset(preset GamePreset, standardDurations PhaseDurations) 
 			NightDuration:         "45s",
 			DayDiscussionDuration: "2m",
 			DayVotingDuration:     "45s",
+			LastWordsDuration:     "15s",
 			MinimumPlayers:        4,
 			RevealRolesOnDeath:    true,
 			Roles: RoleConfiguration{
@@ -87,6 +90,7 @@ func GameSettingsForPreset(preset GamePreset, standardDurations PhaseDurations) 
 			NightDuration:         "2m",
 			DayDiscussionDuration: "7m",
 			DayVotingDuration:     "1m30s",
+			LastWordsDuration:     "45s",
 			MinimumPlayers:        5,
 			RevealRolesOnDeath:    true,
 			Roles: RoleConfiguration{
@@ -102,6 +106,7 @@ func GameSettingsForPreset(preset GamePreset, standardDurations PhaseDurations) 
 			NightDuration:         "1m30s",
 			DayDiscussionDuration: "4m",
 			DayVotingDuration:     "1m",
+			LastWordsDuration:     "30s",
 			MinimumPlayers:        6,
 			Roles: RoleConfiguration{
 				Killers:    1,
@@ -117,6 +122,7 @@ func GameSettingsForPreset(preset GamePreset, standardDurations PhaseDurations) 
 			NightDuration:         "1m",
 			DayDiscussionDuration: "2m",
 			DayVotingDuration:     "45s",
+			LastWordsDuration:     "15s",
 			MinimumPlayers:        2,
 			Roles: RoleConfiguration{
 				Killers: 1,
@@ -161,6 +167,7 @@ func (s GameSettings) ValidateWithRuleSet(maxPlayers int, rules *RuleSet) (Phase
 		durations.Night,
 		durations.DayDiscussion,
 		durations.DayVoting,
+		durations.LastWords,
 	} {
 		if duration < MinConfigurablePhaseDuration || duration > MaxConfigurablePhaseDuration {
 			return PhaseDurations{}, ErrInvalidPhaseDuration
@@ -219,10 +226,15 @@ func (s GameSettings) phaseDurations() (PhaseDurations, error) {
 	if err != nil {
 		return PhaseDurations{}, ErrInvalidPhaseDuration
 	}
+	lastWords, err := time.ParseDuration(s.LastWordsDuration)
+	if err != nil {
+		return PhaseDurations{}, ErrInvalidPhaseDuration
+	}
 	durations := PhaseDurations{
 		Night:         night,
 		DayDiscussion: discussion,
 		DayVoting:     voting,
+		LastWords:     lastWords,
 	}
 	if err := durations.Validate(); err != nil {
 		return PhaseDurations{}, ErrInvalidPhaseDuration

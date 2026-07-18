@@ -40,10 +40,11 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 - Public disconnected and AFK participant signals
 - Registry-backed role capabilities and ordered night-action resolution
 - Escort role with action blocking and an advanced preset
+- Server-authoritative last-words phase with speaker-only timed chat
 
 ## Next Tasks
 
-1. Add a last-words phase and continue expanding roles or alternate modes on the rule registry.
+1. Add a registry-backed alternate win mode or another role with a distinct faction interaction.
 2. Add Docker Compose for local deployment.
 3. Add GitHub Actions for `make test`.
 4. Add a load test script for WebSocket rooms.
@@ -53,4 +54,4 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 
 ## Current Priority
 
-The role registry now centralizes faction, night ability, action priority, target policy, day ability, deck construction, investigation alignment, and win counting. The current priority is a server-authoritative last-words phase after execution, followed by additional registry-backed roles or alternate win modes.
+The role registry now centralizes faction, night ability, action priority, target policy, day ability, deck construction, investigation alignment, and win counting. Vote executions now include server-authoritative last words before delayed win evaluation. The next game-rule expansion should prove alternate win handling or another distinct faction interaction on top of this foundation.

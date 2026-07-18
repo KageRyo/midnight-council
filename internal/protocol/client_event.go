@@ -26,6 +26,7 @@ type ClientEvent struct {
 	NightDuration         string          `json:"night_duration,omitempty"`
 	DayDiscussionDuration string          `json:"day_discussion_duration,omitempty"`
 	DayVotingDuration     string          `json:"day_voting_duration,omitempty"`
+	LastWordsDuration     string          `json:"last_words_duration,omitempty"`
 	MinimumPlayers        *int            `json:"minimum_players,omitempty"`
 	RevealRolesOnDeath    *bool           `json:"reveal_roles_on_death,omitempty"`
 	Killers               *int            `json:"killers,omitempty"`
@@ -90,6 +91,7 @@ func (e ClientEvent) RoomEvent(playerID, playerName string) room.Event {
 		NightDuration:         strings.TrimSpace(e.NightDuration),
 		DayDiscussionDuration: strings.TrimSpace(e.DayDiscussionDuration),
 		DayVotingDuration:     strings.TrimSpace(e.DayVotingDuration),
+		LastWordsDuration:     strings.TrimSpace(e.LastWordsDuration),
 		MinimumPlayers:        intValue(e.MinimumPlayers),
 		RevealRolesOnDeath:    boolValue(e.RevealRolesOnDeath),
 		Roles: room.RoleConfiguration{
@@ -154,6 +156,7 @@ func (e ClientEvent) validateShape() error {
 		if strings.TrimSpace(e.NightDuration) == "" ||
 			strings.TrimSpace(e.DayDiscussionDuration) == "" ||
 			strings.TrimSpace(e.DayVotingDuration) == "" ||
+			strings.TrimSpace(e.LastWordsDuration) == "" ||
 			e.MinimumPlayers == nil ||
 			e.RevealRolesOnDeath == nil ||
 			e.Killers == nil ||
@@ -168,6 +171,7 @@ func (e ClientEvent) validateShape() error {
 			fieldNightDuration,
 			fieldDayDiscussionDuration,
 			fieldDayVotingDuration,
+			fieldLastWordsDuration,
 			fieldMinimumPlayers,
 			fieldRevealRolesOnDeath,
 			fieldKillers,
@@ -200,6 +204,7 @@ const (
 	fieldNightDuration         clientField = "night_duration"
 	fieldDayDiscussionDuration clientField = "day_discussion_duration"
 	fieldDayVotingDuration     clientField = "day_voting_duration"
+	fieldLastWordsDuration     clientField = "last_words_duration"
 	fieldMinimumPlayers        clientField = "minimum_players"
 	fieldRevealRolesOnDeath    clientField = "reveal_roles_on_death"
 	fieldKillers               clientField = "killers"
@@ -230,6 +235,7 @@ func rejectUnexpectedFields(e ClientEvent, allowedFields ...clientField) error {
 		{field: fieldNightDuration, present: strings.TrimSpace(e.NightDuration) != ""},
 		{field: fieldDayDiscussionDuration, present: strings.TrimSpace(e.DayDiscussionDuration) != ""},
 		{field: fieldDayVotingDuration, present: strings.TrimSpace(e.DayVotingDuration) != ""},
+		{field: fieldLastWordsDuration, present: strings.TrimSpace(e.LastWordsDuration) != ""},
 		{field: fieldMinimumPlayers, present: e.MinimumPlayers != nil},
 		{field: fieldRevealRolesOnDeath, present: e.RevealRolesOnDeath != nil},
 		{field: fieldKillers, present: e.Killers != nil},
