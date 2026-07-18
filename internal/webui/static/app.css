@@ -891,6 +891,11 @@ h2 {
   box-shadow: 0 0 7px rgba(99, 195, 156, 0.48);
 }
 
+.player-state.afk {
+  background: var(--gold);
+  box-shadow: 0 0 7px rgba(232, 187, 104, 0.55);
+}
+
 .participant-actions {
   display: inline-flex;
   gap: 7px;

@@ -34,18 +34,21 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 - Room-owned phase durations, minimum players, death-role reveal, and role pool
 - Server-authoritative standard, quick, beginner, and minimal presets
 - Server validation for duration, capacity, role legality, and starting balance
+- Automatic browser reconnect with capped exponential backoff
+- One active WebSocket per player or spectator identity
+- Sequenced client events, acknowledgements, pending replay, and server deduplication
+- Public disconnected and AFK participant signals
 
 ## Next Tasks
 
-1. Improve connection reliability with automatic reconnect, one active connection per seat, event sequencing, deduplication, and AFK signals.
-2. Refactor roles into an extensible rule system and add more roles, ordered night actions, last words, or alternate modes.
-3. Add Docker Compose for local deployment.
-4. Add GitHub Actions for `make test`.
-5. Add a load test script for WebSocket rooms.
-6. Add JWT authentication for persistent accounts.
-7. Add PostgreSQL persistence for accounts, game summaries, and audit logs.
-8. Add Redis Pub/Sub support for future multi-instance room routing.
+1. Refactor roles into an extensible rule system and add more roles, ordered night actions, last words, or alternate modes.
+2. Add Docker Compose for local deployment.
+3. Add GitHub Actions for `make test`.
+4. Add a load test script for WebSocket rooms.
+5. Add JWT authentication for persistent accounts.
+6. Add PostgreSQL persistence for accounts, game summaries, and audit logs.
+7. Add Redis Pub/Sub support for future multi-instance room routing.
 
 ## Current Priority
 
-The current priority is connection reliability. Rooms now support repeated play and validated game settings; the next requirement is to make temporary network loss safe through automatic reconnect, one active socket per identity, event sequencing and deduplication, and visible disconnect or AFK state.
+The current priority is the extensible game-rule layer. Connection loss is now recoverable and sequenced; the next requirement is to separate role definitions, night-action ordering, resolution, and win rules so new roles and modes do not keep expanding one monolithic state switch.

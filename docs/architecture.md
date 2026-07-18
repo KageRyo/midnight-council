@@ -57,13 +57,13 @@ The client has no build step or third-party runtime dependency. It renders serve
 - Client events must be text JSON messages.
 - The server expects a pong within 60 seconds and sends a ping every 45 seconds.
 - Writes have a 10-second deadline.
-- A disconnect dispatches a room leave event with a two-second timeout.
+- A transport loss marks the active participant disconnected without deleting its seat; an explicit normal close with reason `player left` performs the permanent waiting-room leave path.
 - Each connection has independent chat and game-event token buckets.
 - The `spectator=true` query parameter creates or reclaims a spectator identity instead of a player seat.
 
 Only text events that pass protocol decoding and shape validation reach the connection limiter. Chat consumes the chat bucket; every other accepted client event consumes the game bucket. An event with no token is answered with an error envelope and is never dispatched to the room actor. Invalid JSON and schema errors also never reach the actor.
 
-An initial join rejection writes an error envelope and then closes the WebSocket with policy-violation code `1008`; short public errors are repeated as the close reason so browsers can still explain the rejection if they observe the close before rendering the envelope.
+An initial join rejection writes an error envelope and then closes the WebSocket with policy-violation code `1008`; short public errors are repeated as the close reason so browsers can still explain the rejection if they observe the close before rendering the envelope. A valid reconnect for a seat that already has a subscriber atomically replaces that subscription, sends `connection replaced by a newer session` to the old socket, and closes it with the same code. Actor dispatch from the replaced subscription is rejected, so a stale reader cannot mutate room state during shutdown.
 
 Buckets start at burst capacity. Chat defaults to one token per second with a burst of five; game events default to five tokens per second with a burst of ten. `WS_CHAT_EVENTS_PER_SECOND`, `WS_CHAT_BURST`, `WS_GAME_EVENTS_PER_SECOND`, and `WS_GAME_BURST` override these positive values at startup. Limits are process-local and connection-local, so a new WebSocket receives fresh buckets; cross-instance and account-wide controls remain future infrastructure concerns.
 
@@ -79,11 +79,19 @@ The WebSocket upgrader currently accepts every HTTP origin. This is suitable for
 
 The mirrored machine-readable client schema is `docs/websocket-client-event.schema.json`. Transport details and server envelopes are documented in `docs/websocket-protocol.md`.
 
+### Connection reliability
+
+The official client assigns each event a monotonically increasing JavaScript-safe `sequence`. The room stores only the latest successfully applied sequence on the private player or spectator record. A sequence at or below that value returns a `duplicate` acknowledgement and does not run the state transition again. Newer successful events return `applied`; validated events rejected by rate limiting, moderation, or room authorization return `rejected` alongside the normal error envelope. Unsequenced clients remain supported but do not receive delivery acknowledgements.
+
+The browser persists its next sequence and up to 50 unacknowledged payloads with the room reconnect token. A live connection loss disables controls, retries forever with exponential delay capped at ten seconds, and replays pending payloads in ascending order after the socket opens. An acknowledgement removes the payload regardless of status. A terminal kick, invalid identity, or newer connection replacement blocks that retry loop.
+
+Presence is an ordinary validated `presence` event. The browser reports AFK after two minutes without pointer, keyboard, or touch activity, and immediately when the document becomes hidden; activity or visibility clears it. Public player and spectator projections include both `connected` and `afk`, while transport disconnect always clears AFK.
+
 ### Hub and room actors
 
 `room.Hub` owns the map of room IDs to actors. The first connection creates a room implicitly. Each actor has one inbox and applies commands sequentially, so state transitions within a room do not need shared-state locks.
 
-The actor broadcasts successful state changes to all subscribers. Each subscriber has a 16-message buffer; a subscriber that cannot keep up is removed rather than blocking the room. State envelopes are personalized immediately before delivery.
+The actor broadcasts successful state changes to all subscribers. Each participant ID can own only one subscription. Each subscriber has a 16-message buffer; a subscriber that cannot keep up is removed, marked disconnected, and announced to the remaining room rather than blocking the actor. State envelopes are personalized immediately before delivery.
 
 Kicking a participant is an actor-level terminal operation: the room discards pending events for that identity, guarantees one private removal error, removes and closes every matching subscription, then broadcasts the new public state to the remaining participants.
 
@@ -136,7 +144,7 @@ Changing settings clears every non-owner readiness flag so players must acknowle
 
 The state distinguishes seated players from spectators. Players count toward the room's player cap and can receive roles; spectators have their own public list and private reconnect token but never receive a role or game action. A new player may join only in `WAITING`, while a new spectator may join during any phase. A locked room rejects both kinds of new participant but still permits a valid reconnect.
 
-Rooms default to 12 player seats and owners may choose a limit from 2 through 20 while waiting or after a game. Spectators do not consume player capacity. Owners may lock or unlock the room in any phase, explicitly transfer ownership to a connected seated player, and kick a player or spectator while waiting or after a game. When the owner disconnects during an active or finished game, ownership moves to another connected seated player when one exists.
+Rooms default to 12 player seats and owners may choose a limit from 2 through 20 while waiting or after a game. Spectators do not consume player capacity. Owners may lock or unlock the room in any phase, explicitly transfer ownership to a connected seated player, and kick a player or spectator while waiting or after a game. When the owner disconnects in any phase, ownership moves to another connected seated player when one exists.
 
 The owner may send `return_to_waiting` from an active or finished phase. This clears the round, deadlines, roles, readiness, actions, votes, investigations, result, and public game log. Connected players and spectators keep their identities and reconnect tokens; disconnected participants are removed. Room-level options such as lock state and player cap remain unchanged for the rematch.
 
@@ -155,7 +163,7 @@ This projection boundary is a core invariant: hidden state must remain in `inter
 
 ## Reconnect Lifecycle
 
-Joining a new player or spectator identity creates a 32-byte reconnect token. During `WAITING`, leaving removes that identity. After the game begins, leaving only marks it disconnected so active game state remains intact until a return-to-waiting reset.
+Joining a new player or spectator identity creates a 32-byte reconnect token. A network disconnect preserves the identity in every phase and sets `connected` false, including in `WAITING`, so the token can reclaim it. An explicit leave removes the identity while waiting; during an active or finished game it remains disconnected so the authoritative match record is not altered. Disconnected waiting-room participants may be removed by the owner, and a return-to-waiting reset removes disconnected identities.
 
 Reclaiming an existing participant ID requires the exact token and the same player-versus-spectator type. The browser stores the generated ID, type, and token per room and resubmits them when the participant chooses to reconnect. The token is present only in `PrivatePlayerView` and in the WebSocket connection query; it is never broadcast publicly.
 
@@ -174,9 +182,9 @@ PostgreSQL, Redis, and multi-instance routing belong behind these boundaries rat
 ## Test Boundaries
 
 - `internal/protocol`: malformed JSON and event-shape validation;
-- `internal/room`: state-machine rules, setting and role-pool validation, room lifecycle, spectator isolation, timeout semantics, actor timer cancellation, private projections, reconnect, and idle cleanup;
+- `internal/room`: state-machine rules, setting and role-pool validation, room lifecycle, spectator isolation, timeout semantics, actor timer cancellation, private projections, sequence deduplication, single-subscription enforcement, reconnect, and idle cleanup;
 - `internal/moderation`: default allow policy and chat policy contract;
-- `internal/ws`: real WebSocket multiplayer flow, room administration, spectator connections, terminal disconnects, rate-limit ordering, moderation decisions, automatic phase broadcasts, and transport errors;
-- `internal/webui`: embedded asset routing, deadline-consumption checks, content types, method handling, and security headers.
+- `internal/ws`: real WebSocket multiplayer flow, room administration, spectator connections, terminal replacement, network-versus-explicit disconnect, acknowledgements, rate-limit ordering, moderation decisions, automatic phase broadcasts, and transport errors;
+- `internal/webui`: embedded asset routing, reconnect and presence source checks, deadline-consumption checks, content types, method handling, and security headers.
 
 Run the full suite with `make test`.

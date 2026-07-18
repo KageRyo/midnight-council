@@ -26,6 +26,7 @@ type wireEnvelope struct {
 	Type    string                  `json:"type"`
 	State   *room.Snapshot          `json:"state,omitempty"`
 	Chat    *room.ChatMessage       `json:"chat,omitempty"`
+	Ack     *room.EventAck          `json:"ack,omitempty"`
 	Error   string                  `json:"error,omitempty"`
 	Private *room.PrivatePlayerView `json:"private,omitempty"`
 }
@@ -157,6 +158,109 @@ func TestHandlerRequiresReconnectTokenForExistingPlayer(t *testing.T) {
 	readStateUntil(t, reconnected, func(_ *room.Snapshot, private *room.PrivatePlayerView) bool {
 		return private != nil && private.ReconnectToken == reconnectToken
 	})
+}
+
+func TestHandlerReplacesExistingConnectionForSameSeat(t *testing.T) {
+	server := httptest.NewServer(NewHandler(room.NewHub()))
+	defer server.Close()
+
+	original := connectClient(t, server.URL, "player", "Player")
+	defer original.conn.Close()
+	joined := readStateUntil(t, original, func(_ *room.Snapshot, private *room.PrivatePlayerView) bool {
+		return private != nil && private.ReconnectToken != ""
+	})
+
+	replacement := connectClientWithToken(t, server.URL, "player", "Player New", joined.Private.ReconnectToken)
+	defer replacement.conn.Close()
+	readStateUntil(t, replacement, func(state *room.Snapshot, private *room.PrivatePlayerView) bool {
+		return len(state.Players) == 1 && state.Players[0].Connected && private != nil
+	})
+
+	readEnvelopeUntil(t, original, func(envelope wireEnvelope) bool {
+		return envelope.Type == "error" && envelope.Error == room.ErrConnectionReplaced.Error()
+	})
+	assertPolicyViolationClose(t, original, room.ErrConnectionReplaced.Error())
+}
+
+func TestHandlerPreservesNetworkDisconnectButRemovesExplicitWaitingLeave(t *testing.T) {
+	server := httptest.NewServer(NewHandler(room.NewHub()))
+	defer server.Close()
+
+	owner := connectClient(t, server.URL, "owner", "Owner")
+	guest := connectClient(t, server.URL, "guest", "Guest")
+	defer owner.conn.Close()
+	defer guest.conn.Close()
+
+	joined := readStateUntil(t, guest, func(state *room.Snapshot, private *room.PrivatePlayerView) bool {
+		return len(state.Players) == 2 && private != nil && private.ReconnectToken != ""
+	})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return len(state.Players) == 2
+	})
+
+	if err := guest.conn.Close(); err != nil {
+		t.Fatalf("drop guest connection: %v", err)
+	}
+	disconnected := readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return len(state.Players) == 2 && !playerConnected(t, state, "guest")
+	})
+	if playerConnected(t, disconnected.State, "guest") {
+		t.Fatal("network disconnect removed offline indication")
+	}
+
+	reconnected := connectClientWithToken(t, server.URL, "guest", "Guest Again", joined.Private.ReconnectToken)
+	defer reconnected.conn.Close()
+	readStateUntil(t, reconnected, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return len(state.Players) == 2 && playerConnected(t, state, "guest")
+	})
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return len(state.Players) == 2 && playerConnected(t, state, "guest")
+	})
+
+	if err := reconnected.conn.WriteControl(
+		websocket.CloseMessage,
+		websocket.FormatCloseMessage(websocket.CloseNormalClosure, "player left"),
+		time.Now().Add(time.Second),
+	); err != nil {
+		t.Fatalf("write explicit leave close: %v", err)
+	}
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return len(state.Players) == 1
+	})
+}
+
+func TestHandlerAcknowledgesAndDeduplicatesSequencedEvents(t *testing.T) {
+	server := httptest.NewServer(NewHandler(room.NewHub()))
+	defer server.Close()
+
+	owner := connectClient(t, server.URL, "owner", "Owner")
+	guest := connectClient(t, server.URL, "guest", "Guest")
+	defer closeClients([]*testClient{owner, guest})
+	for _, client := range []*testClient{owner, guest} {
+		readStateUntil(t, client, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+			return len(state.Players) == 2
+		})
+	}
+
+	writeClientEvent(t, guest, map[string]any{"type": "ready", "sequence": 1, "ready": true})
+	readAckUntil(t, guest, 1, "applied")
+	readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return playerReady(t, state, "guest")
+	})
+
+	writeClientEvent(t, guest, map[string]any{"type": "ready", "sequence": 1, "ready": false})
+	readAckUntil(t, guest, 1, "duplicate")
+	writeClientEvent(t, guest, map[string]any{"type": "presence", "sequence": 2, "afk": true})
+	readAckUntil(t, guest, 2, "applied")
+	presence := readStateUntil(t, owner, func(state *room.Snapshot, _ *room.PrivatePlayerView) bool {
+		return playerAFK(t, state, "guest")
+	})
+	if !playerReady(t, presence.State, "guest") {
+		t.Fatal("duplicate sequence changed guest readiness")
+	}
+
+	writeClientEvent(t, guest, map[string]any{"type": "start_game", "sequence": 3})
+	readAckUntil(t, guest, 3, "rejected")
 }
 
 func TestHandlerBroadcastsAutomaticPhaseProgression(t *testing.T) {
@@ -674,6 +778,21 @@ func readEnvelope(t *testing.T, client *testClient, deadline time.Time) wireEnve
 	return envelope
 }
 
+func readAckUntil(t *testing.T, client *testClient, sequence uint64, status string) wireEnvelope {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		envelope := readEnvelope(t, client, deadline)
+		if envelope.Type == "ack" && envelope.Ack != nil &&
+			envelope.Ack.Sequence == sequence && envelope.Ack.Status == status {
+			return envelope
+		}
+		if envelope.Type == "error" && status != "rejected" {
+			t.Fatalf("unexpected error envelope for %s: %s", client.id, envelope.Error)
+		}
+	}
+}
+
 func assertNextChat(t *testing.T, client *testClient, playerID, message string) {
 	t.Helper()
 	envelope := readEnvelope(t, client, time.Now().Add(5*time.Second))
@@ -751,6 +870,30 @@ func playerReady(t *testing.T, state *room.Snapshot, playerID string) bool {
 	for _, player := range state.Players {
 		if player.ID == playerID {
 			return player.Ready
+		}
+	}
+	t.Fatalf("player %s missing from state", playerID)
+	return false
+}
+
+func playerConnected(t *testing.T, state *room.Snapshot, playerID string) bool {
+	t.Helper()
+
+	for _, player := range state.Players {
+		if player.ID == playerID {
+			return player.Connected
+		}
+	}
+	t.Fatalf("player %s missing from state", playerID)
+	return false
+}
+
+func playerAFK(t *testing.T, state *room.Snapshot, playerID string) bool {
+	t.Helper()
+
+	for _, player := range state.Players {
+		if player.ID == playerID {
+			return player.AFK
 		}
 	}
 	t.Fatalf("player %s missing from state", playerID)

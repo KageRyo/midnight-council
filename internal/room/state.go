@@ -53,6 +53,8 @@ var (
 	ErrPlayerLimitOutOfRange   = errors.New("player limit is out of range")
 	ErrPlayerLimitBelowCurrent = errors.New("player limit cannot be below the current player count")
 	ErrAlreadyWaiting          = errors.New("room is already waiting")
+	ErrConnectionReplaced      = errors.New("connection replaced by a newer session")
+	ErrDuplicateClientEvent    = errors.New("client event was already processed")
 )
 
 type State struct {
@@ -108,46 +110,65 @@ func (s *State) Apply(event Event) (*Envelope, error) {
 		event.At = time.Now().UTC()
 	}
 
+	if event.ClientSequence > 0 {
+		if last, ok := s.lastClientSequence(event.PlayerID); ok && event.ClientSequence <= last {
+			return nil, fmt.Errorf("%w: sequence %d", ErrDuplicateClientEvent, event.ClientSequence)
+		}
+	}
+
+	var envelope *Envelope
+	var err error
 	switch event.Type {
 	case EventJoin:
-		return s.applyJoin(event)
+		envelope, err = s.applyJoin(event)
 	case EventLeave:
-		return s.applyLeave(event)
+		envelope, err = s.applyLeave(event)
+	case EventDisconnect:
+		envelope, err = s.applyDisconnect(event)
 	case EventReady:
-		return s.applyReady(event)
+		envelope, err = s.applyReady(event)
 	case EventStartGame:
-		return s.applyStartGame(event)
+		envelope, err = s.applyStartGame(event)
 	case EventChat:
-		return s.applyChat(event)
+		envelope, err = s.applyChat(event)
 	case EventNightAction:
-		return s.applyNightAction(event)
+		envelope, err = s.applyNightAction(event)
 	case EventNightPass:
-		return s.applyNightPass(event)
+		envelope, err = s.applyNightPass(event)
 	case EventStartVote:
-		return s.applyStartVote(event)
+		envelope, err = s.applyStartVote(event)
 	case EventVote:
-		return s.applyVote(event)
+		envelope, err = s.applyVote(event)
 	case EventShoot:
-		return s.applyShoot(event)
+		envelope, err = s.applyShoot(event)
 	case EventTransferOwner:
-		return s.applyTransferOwner(event)
+		envelope, err = s.applyTransferOwner(event)
 	case EventKickParticipant:
-		return s.applyKickParticipant(event)
+		envelope, err = s.applyKickParticipant(event)
 	case EventSetRoomLocked:
-		return s.applySetRoomLocked(event)
+		envelope, err = s.applySetRoomLocked(event)
 	case EventSetPlayerLimit:
-		return s.applySetPlayerLimit(event)
+		envelope, err = s.applySetPlayerLimit(event)
 	case EventSetGameSettings:
-		return s.applySetGameSettings(event)
+		envelope, err = s.applySetGameSettings(event)
 	case EventSetGamePreset:
-		return s.applySetGamePreset(event)
+		envelope, err = s.applySetGamePreset(event)
+	case EventPresence:
+		envelope, err = s.applyPresence(event)
 	case EventReturnToWaiting:
-		return s.applyReturnToWaiting(event)
+		envelope, err = s.applyReturnToWaiting(event)
 	case EventPhaseTimeout:
-		return s.applyPhaseTimeout(event)
+		envelope, err = s.applyPhaseTimeout(event)
 	default:
 		return nil, fmt.Errorf("unknown room event: %s", event.Type)
 	}
+	if err != nil {
+		return nil, err
+	}
+	if event.ClientSequence > 0 {
+		s.recordClientSequence(event.PlayerID, event.ClientSequence)
+	}
+	return envelope, nil
 }
 
 func (s *State) Snapshot() Snapshot {
@@ -166,6 +187,7 @@ func (s *State) Snapshot() Snapshot {
 			Connected: player.Connected,
 			Owner:     player.ID == s.ownerID,
 			Alive:     alive,
+			AFK:       player.AFK,
 		}
 		if s.phase == PhaseFinished ||
 			(s.gameSettings.RevealRolesOnDeath && s.phase != PhaseWaiting && !player.Alive) {
@@ -187,6 +209,7 @@ func (s *State) Snapshot() Snapshot {
 			ID:        spectator.ID,
 			Name:      spectator.Name,
 			Connected: spectator.Connected,
+			AFK:       spectator.AFK,
 		})
 	}
 	sort.Slice(spectators, func(i, j int) bool {
@@ -315,6 +338,7 @@ func (s *State) applyJoin(event Event) (*Envelope, error) {
 		}
 		player.Name = strings.TrimSpace(event.PlayerName)
 		player.Connected = true
+		player.AFK = false
 		s.ensureConnectedOwner()
 		s.touch(event.At)
 		return stateEnvelope(s.Snapshot()), nil
@@ -333,6 +357,7 @@ func (s *State) applyJoin(event Event) (*Envelope, error) {
 		}
 		spectator.Name = strings.TrimSpace(event.PlayerName)
 		spectator.Connected = true
+		spectator.AFK = false
 		s.touch(event.At)
 		return stateEnvelope(s.Snapshot()), nil
 	}
@@ -394,6 +419,7 @@ func (s *State) applyLeave(event Event) (*Envelope, error) {
 			}
 		} else {
 			player.Connected = false
+			player.AFK = false
 			if s.ownerID == event.PlayerID {
 				s.ensureConnectedOwner()
 			}
@@ -411,10 +437,31 @@ func (s *State) applyLeave(event Event) (*Envelope, error) {
 		delete(s.spectators, event.PlayerID)
 	} else {
 		spectator.Connected = false
+		spectator.AFK = false
 	}
 
 	s.touch(event.At)
 	return stateEnvelope(s.Snapshot()), nil
+}
+
+func (s *State) applyDisconnect(event Event) (*Envelope, error) {
+	if player, ok := s.players[event.PlayerID]; ok {
+		player.Connected = false
+		player.AFK = false
+		if s.ownerID == event.PlayerID {
+			s.ensureConnectedOwner()
+		}
+		s.touch(event.At)
+		return stateEnvelope(s.Snapshot()), nil
+	}
+
+	if spectator, ok := s.spectators[event.PlayerID]; ok {
+		spectator.Connected = false
+		spectator.AFK = false
+		s.touch(event.At)
+		return stateEnvelope(s.Snapshot()), nil
+	}
+	return nil, ErrParticipantNotFound
 }
 
 func (s *State) applyReady(event Event) (*Envelope, error) {
@@ -429,6 +476,20 @@ func (s *State) applyReady(event Event) (*Envelope, error) {
 	player.Ready = event.Ready
 	s.touch(event.At)
 	return stateEnvelope(s.Snapshot()), nil
+}
+
+func (s *State) applyPresence(event Event) (*Envelope, error) {
+	if player, ok := s.players[event.PlayerID]; ok {
+		player.AFK = event.AFK
+		s.touch(event.At)
+		return stateEnvelope(s.Snapshot()), nil
+	}
+	if spectator, ok := s.spectators[event.PlayerID]; ok {
+		spectator.AFK = event.AFK
+		s.touch(event.At)
+		return stateEnvelope(s.Snapshot()), nil
+	}
+	return nil, ErrParticipantNotFound
 }
 
 func (s *State) applyStartGame(event Event) (*Envelope, error) {
@@ -1159,6 +1220,26 @@ func (s *State) enterPhase(phase Phase, at time.Time) {
 
 func (s *State) touch(at time.Time) {
 	s.updatedAt = at.UTC()
+}
+
+func (s *State) lastClientSequence(playerID string) (uint64, bool) {
+	if player, ok := s.players[playerID]; ok {
+		return player.LastClientSequence, true
+	}
+	if spectator, ok := s.spectators[playerID]; ok {
+		return spectator.LastClientSequence, true
+	}
+	return 0, false
+}
+
+func (s *State) recordClientSequence(playerID string, sequence uint64) {
+	if player, ok := s.players[playerID]; ok {
+		player.LastClientSequence = sequence
+		return
+	}
+	if spectator, ok := s.spectators[playerID]; ok {
+		spectator.LastClientSequence = sequence
+	}
 }
 
 func stateEnvelope(snapshot Snapshot) *Envelope {

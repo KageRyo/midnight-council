@@ -190,3 +190,27 @@ func TestDecodeClientEventRejectsGameSettingFieldsOnOtherEvents(t *testing.T) {
 		t.Fatal("start_game should reject minimum_players")
 	}
 }
+
+func TestDecodeClientEventMapsSequenceAndPresence(t *testing.T) {
+	event, err := DecodeClientEvent(strings.NewReader(`{"type":"presence","sequence":42,"afk":true}`))
+	if err != nil {
+		t.Fatalf("decode presence: %v", err)
+	}
+	roomEvent := event.RoomEvent("player", "Player")
+	if roomEvent.Type != room.EventPresence || roomEvent.ClientSequence != 42 || !roomEvent.AFK {
+		t.Fatalf("room presence event = %#v", roomEvent)
+	}
+}
+
+func TestDecodeClientEventRejectsInvalidSequenceAndPresenceShape(t *testing.T) {
+	for _, payload := range []string{
+		`{"type":"ready","sequence":0,"ready":true}`,
+		`{"type":"ready","sequence":9007199254740992,"ready":true}`,
+		`{"type":"presence","sequence":1}`,
+		`{"type":"start_game","afk":true}`,
+	} {
+		if _, err := DecodeClientEvent(strings.NewReader(payload)); err == nil {
+			t.Fatalf("payload %s should be rejected", payload)
+		}
+	}
+}

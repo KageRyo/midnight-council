@@ -111,41 +111,33 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		writeTerminalError(conn, err.Error())
 		return
 	}
-	defer func() {
-		leaveCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer cancel()
-		_, _ = actor.Dispatch(leaveCtx, room.Event{
-			Type:     room.EventLeave,
-			PlayerID: playerID,
-		})
-	}()
-
-	events, unsubscribe, err := actor.Subscribe(ctx, playerID)
+	events, subscriptionID, unsubscribe, err := actor.SubscribeConnection(ctx, playerID)
 	if err != nil {
 		writeTerminalError(conn, err.Error())
 		return
 	}
-	defer unsubscribe()
 
 	done := make(chan struct{})
 	errors := make(chan room.Envelope, 8)
 	go writePump(conn, events, errors, done)
 	limiter := newConnectionRateLimiter(h.rateLimits, time.Now())
-	readPump(ctx, actor, roomID, playerID, playerName, conn, errors, limiter, h.chatPolicy)
+	permanent := readPump(ctx, actor, subscriptionID, roomID, playerID, playerName, conn, errors, limiter, h.chatPolicy)
 	close(done)
+	unsubscribe(permanent)
 }
 
 func readPump(
 	ctx context.Context,
 	actor *room.Actor,
+	subscriptionID string,
 	roomID string,
 	playerID string,
 	playerName string,
 	conn *websocket.Conn,
-	errors chan<- room.Envelope,
+	outgoing chan<- room.Envelope,
 	limiter *connectionRateLimiter,
 	chatPolicy moderation.ChatPolicy,
-) {
+) bool {
 	conn.SetReadLimit(1024)
 	_ = conn.SetReadDeadline(time.Now().Add(pongWait))
 	conn.SetPongHandler(func(string) error {
@@ -155,26 +147,31 @@ func readPump(
 	for {
 		messageType, payload, err := conn.ReadMessage()
 		if err != nil {
-			return
+			var closeError *websocket.CloseError
+			return errors.As(err, &closeError) &&
+				closeError.Code == websocket.CloseNormalClosure &&
+				closeError.Text == "player left"
 		}
 		if messageType != websocket.TextMessage {
-			if !sendError(errors, "client events must be text JSON messages") {
-				return
+			if !sendError(outgoing, "client events must be text JSON messages") {
+				return false
 			}
 			continue
 		}
 
 		incoming, err := protocol.DecodeClientEvent(bytes.NewReader(payload))
 		if err != nil {
-			if !sendError(errors, err.Error()) {
-				return
+			if !sendError(outgoing, err.Error()) {
+				return false
 			}
 			continue
 		}
+		sequence := incoming.SequenceValue()
 
 		if !limiter.allow(incoming.Type, time.Now()) {
-			if !sendError(errors, rateLimitError(incoming.Type)) {
-				return
+			message := rateLimitError(incoming.Type)
+			if !sendError(outgoing, message) || !sendAck(outgoing, sequence, "rejected") {
+				return false
 			}
 			continue
 		}
@@ -191,18 +188,49 @@ func readPump(
 				log.Printf("chat moderation failed for room %q player %q: %v", roomID, playerID, moderationErr)
 			}
 			if publicError != "" {
-				if !sendError(errors, publicError) {
-					return
+				if !sendError(outgoing, publicError) || !sendAck(outgoing, sequence, "rejected") {
+					return false
 				}
 				continue
 			}
 			event.Message = message
 		}
-		if _, err := actor.Dispatch(ctx, event); err != nil {
-			if !sendError(errors, err.Error()) {
-				return
+		if _, err := actor.DispatchFrom(ctx, subscriptionID, event); err != nil {
+			if errors.Is(err, room.ErrDuplicateClientEvent) {
+				if !sendAck(outgoing, sequence, "duplicate") {
+					return false
+				}
+				continue
 			}
+			if errors.Is(err, room.ErrConnectionReplaced) {
+				continue
+			}
+			if !sendError(outgoing, err.Error()) || !sendAck(outgoing, sequence, "rejected") {
+				return false
+			}
+			continue
 		}
+		if !sendAck(outgoing, sequence, "applied") {
+			return false
+		}
+	}
+}
+
+func sendAck(outgoing chan<- room.Envelope, sequence uint64, status string) bool {
+	if sequence == 0 {
+		return true
+	}
+	select {
+	case outgoing <- room.Envelope{
+		Type: "ack",
+		Ack: &room.EventAck{
+			Sequence: sequence,
+			Status:   status,
+		},
+	}:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -218,6 +246,7 @@ func sendError(errors chan<- room.Envelope, message string) bool {
 func writePump(conn *websocket.Conn, events <-chan room.Envelope, errors <-chan room.Envelope, done <-chan struct{}) {
 	ticker := time.NewTicker(pingPeriod)
 	defer ticker.Stop()
+	defer conn.Close()
 
 	for {
 		select {
@@ -229,8 +258,16 @@ func writePump(conn *websocket.Conn, events <-chan room.Envelope, errors <-chan 
 			if err := writeEnvelope(conn, envelope); err != nil {
 				return
 			}
+			if terminalEnvelope(envelope) {
+				writeCloseControl(conn, envelope.Error)
+				return
+			}
 		case envelope := <-errors:
 			if err := writeEnvelope(conn, envelope); err != nil {
+				return
+			}
+			if terminalEnvelope(envelope) {
+				writeCloseControl(conn, envelope.Error)
 				return
 			}
 		case <-ticker.C:
@@ -256,6 +293,15 @@ func writeEnvelope(conn *websocket.Conn, envelope room.Envelope) error {
 
 func writeTerminalError(conn *websocket.Conn, message string) {
 	_ = writeEnvelope(conn, room.Envelope{Type: "error", Error: message})
+	writeCloseControl(conn, message)
+}
+
+func terminalEnvelope(envelope room.Envelope) bool {
+	return envelope.Type == "error" &&
+		(envelope.Error == room.ErrKicked.Error() || envelope.Error == room.ErrConnectionReplaced.Error())
+}
+
+func writeCloseControl(conn *websocket.Conn, message string) {
 	closeReason := message
 	if len([]byte(closeReason)) > 120 {
 		closeReason = "connection rejected"

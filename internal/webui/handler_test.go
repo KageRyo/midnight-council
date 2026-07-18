@@ -154,3 +154,25 @@ func TestGameClientSupportsRoomLifecycleControls(t *testing.T) {
 		}
 	}
 }
+
+func TestGameClientSupportsReliableReconnectAndPresence(t *testing.T) {
+	app, err := assets.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatalf("read app: %v", err)
+	}
+
+	source := string(app)
+	for _, behavior := range []string{
+		"scheduleReconnect",
+		"replayPendingEvents",
+		"nextClientSequence",
+		`case "ack"`,
+		`type: "presence"`,
+		"AFK_AFTER_MS",
+		"connection replaced by a newer session",
+	} {
+		if !strings.Contains(source, behavior) {
+			t.Fatalf("game client is missing reliability behavior %q", behavior)
+		}
+	}
+}

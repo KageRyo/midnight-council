@@ -24,6 +24,10 @@ The Go server and its embedded web client already support a repeatable playable 
 - Shooter one-shot day action
 - Win detection and game result reveal
 - Reconnect token for existing player seats
+- Automatic browser reconnect with capped exponential backoff
+- One active WebSocket per seat, with newer valid connections replacing older ones
+- Sequenced client events, server acknowledgements, and reconnect-safe deduplication
+- Public disconnected and AFK participant indicators
 - Player and spectator participation modes
 - Owner transfer, kick, room lock, and configurable player cap
 - Return-to-waiting reset and same-room rematches
@@ -136,10 +140,13 @@ The client supports:
 - public discussion, voting, abstaining, and shooter actions
 - public game log and final role reveal
 - reconnect-token recovery after refresh
+- automatic recovery after temporary live-connection loss
+- pending-event replay with server sequence acknowledgements
+- visible disconnected and two-minute AFK status
 - countdown synchronized to server time
 - desktop and mobile layouts
 
-The browser stores a generated `player_id`, display name, and reconnect token per room in local storage. The reconnect token is never displayed or included in public room state. Chat is live-only and is not replayed after a refresh; authoritative game events remain available in the room log.
+The browser stores a generated `player_id`, display name, reconnect token, next client sequence, and unacknowledged events per room in local storage. A temporary disconnect triggers automatic reconnect and ordered replay; an already-applied sequence is acknowledged as a duplicate without running the action twice. The reconnect token is never displayed or included in public room state. Chat is live-only beyond any unacknowledged send and is not retained as history; authoritative game events remain available in the room log.
 
 See [`docs/web-client.md`](docs/web-client.md) for client behavior, storage, and current limitations.
 
@@ -218,6 +225,12 @@ The server broadcasts envelopes:
 `state` is safe to broadcast to everyone. `private` is generated per subscriber and contains only that player's own hidden information, including the reconnect token needed to reclaim the same seat.
 
 ### Client Events
+
+The browser adds a positive safe-integer `sequence` to every event. It is optional for backward-compatible clients, but sequenced events receive an `ack` and can be replayed safely after reconnect:
+
+```json
+{"type":"ready","sequence":1,"ready":true}
+```
 
 Ready:
 

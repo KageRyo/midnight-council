@@ -31,7 +31,9 @@ const (
 	EventSetPlayerLimit  EventType = "set_player_limit"
 	EventSetGameSettings EventType = "set_game_settings"
 	EventSetGamePreset   EventType = "set_game_preset"
+	EventPresence        EventType = "presence"
 	EventReturnToWaiting EventType = "return_to_waiting"
+	EventDisconnect      EventType = "disconnect"
 	EventPhaseTimeout    EventType = "phase_timeout"
 )
 
@@ -88,29 +90,35 @@ type Event struct {
 	MaxPlayers     int
 	GameSettings   GameSettings
 	GamePreset     GamePreset
+	AFK            bool
+	ClientSequence uint64
 	Message        string
 	TargetID       string
 	At             time.Time
 }
 
 type Player struct {
-	ID             string
-	Name           string
-	ReconnectToken string
-	Ready          bool
-	Connected      bool
-	Role           Role
-	Alive          bool
-	ShooterUsed    bool
-	JoinedAt       time.Time
+	ID                 string
+	Name               string
+	ReconnectToken     string
+	Ready              bool
+	Connected          bool
+	Role               Role
+	Alive              bool
+	ShooterUsed        bool
+	AFK                bool
+	LastClientSequence uint64
+	JoinedAt           time.Time
 }
 
 type Spectator struct {
-	ID             string
-	Name           string
-	ReconnectToken string
-	Connected      bool
-	JoinedAt       time.Time
+	ID                 string
+	Name               string
+	ReconnectToken     string
+	Connected          bool
+	AFK                bool
+	LastClientSequence uint64
+	JoinedAt           time.Time
 }
 
 type PlayerView struct {
@@ -120,6 +128,7 @@ type PlayerView struct {
 	Connected bool   `json:"connected"`
 	Owner     bool   `json:"owner"`
 	Alive     bool   `json:"alive"`
+	AFK       bool   `json:"afk"`
 	Role      Role   `json:"role,omitempty"`
 }
 
@@ -127,6 +136,7 @@ type SpectatorView struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Connected bool   `json:"connected"`
+	AFK       bool   `json:"afk"`
 }
 
 type Snapshot struct {
@@ -200,10 +210,16 @@ type ChatMessage struct {
 	SentAt   time.Time `json:"sent_at"`
 }
 
+type EventAck struct {
+	Sequence uint64 `json:"sequence"`
+	Status   string `json:"status"`
+}
+
 type Envelope struct {
 	Type    string       `json:"type"`
 	State   *Snapshot    `json:"state,omitempty"`
 	Chat    *ChatMessage `json:"chat,omitempty"`
+	Ack     *EventAck    `json:"ack,omitempty"`
 	Error   string       `json:"error,omitempty"`
 	Private any          `json:"private,omitempty"`
 }

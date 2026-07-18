@@ -32,7 +32,7 @@ Invitation links use `?room={room_id}`. They include only the public room ID and
 The client treats each server state envelope as authoritative and re-renders these areas:
 
 - connection, room, phase, round, and server-synchronized countdown status;
-- public player seats and connection state;
+- public player seats plus connected, disconnected, and AFK state;
 - room access state, player capacity, and the spectator list;
 - the current preset, timing, minimum players, role pool, and death-reveal rule;
 - the current player's private role and life state;
@@ -87,11 +87,13 @@ At `00:00`, the browser stops its local display and waits for the next authorita
 The client stores two versioned local-storage entries:
 
 - the most recently used display name;
-- a map of room IDs to participant ID, display name, spectator flag, and reconnect token.
+- a map of room IDs to participant ID, display name, spectator flag, reconnect token, next client sequence, and up to 50 unacknowledged event payloads.
 
-On refresh, the room query parameter, saved name, and participant type repopulate the join form. The participant explicitly selects **Enter Council** again, after which the saved token reclaims the existing identity. Missing or rejected reconnect credentials are cleared so the next attempt can create a new identity where the room state permits it. A participant removed by the owner also loses the saved room session.
+On refresh, the room query parameter, saved name, and participant type repopulate the join form. The participant explicitly selects **Enter Council** again, after which the saved token reclaims the existing identity. After a live socket loss, the current page reconnects automatically with exponential delay capped at ten seconds and no attempt limit. Controls stay disabled while offline. Once open, pending events are replayed in ascending sequence order; `applied`, `duplicate`, and `rejected` acknowledgements all remove the corresponding pending payload. Missing or rejected reconnect credentials are cleared so the next attempt can create a new identity where the room state permits it. A participant removed by the owner also loses the saved room session.
 
-Rooms opened in multiple tabs of the same browser profile share local storage and therefore represent the same saved seat. Use separate profiles, browsers, or private contexts to test multiple players on one machine.
+Rooms opened in multiple tabs of the same browser profile share local storage and therefore represent the same saved seat. The newest valid socket takes exclusive ownership of that seat; the previous tab is told it was replaced, disables its controls, and does not start a reconnect contest. Use separate profiles, browsers, or private contexts to test multiple players on one machine.
+
+Pointer, keyboard, or touch input resets a two-minute activity timer. Timer expiry or hiding the document sends `presence` with `afk: true`; renewed activity or visibility sends `afk: false`. This signal and transport `connected` state are rendered separately for both players and spectators.
 
 Reconnect tokens are bearer credentials. Do not log them, include them in invitation URLs, expose them in screenshots, or move them into public state. Local storage is acceptable for this prototype; an authenticated production client should revisit token storage, rotation, revocation, and WebSocket origin policy together.
 
@@ -130,13 +132,15 @@ For a manual multiplayer check:
 3. Confirm that each browser sees only its own role.
 4. Submit or pass all required night actions.
 5. Exercise discussion, voting, and any available shooter action.
-6. Refresh one browser and confirm the reconnect prompt restores its seat.
+6. Interrupt one live connection and confirm automatic reconnect restores its seat and pending actions are not applied twice.
 7. Join a spectator during the active game and confirm it receives no role or action controls and cannot chat.
 8. Return to waiting and confirm roles, readiness, result, and game log reset while connected identities remain.
 9. Exercise lock, player cap, kick, and ownership transfer controls.
 10. Apply a preset, then a custom rule set; confirm readiness resets, minimum-player gating changes, and the next night uses the selected duration.
 11. Enable death-role reveal and confirm an eliminated role becomes public while living roles remain hidden.
 12. Run with short phase durations and confirm missing actions, discussion, and votes advance automatically.
+13. Open the same saved seat in a second tab and confirm the first tab is terminally replaced rather than reconnecting.
+14. Hide a tab or wait two minutes and confirm AFK appears separately from disconnected state.
 
 The Go suite tests embedded assets and the complete WebSocket game flow:
 
@@ -152,7 +156,6 @@ node --check internal/webui/static/app.js
 
 ## Current Limitations
 
-- no automatic reconnect loop after a live connection drops;
 - no retained chat history;
 - no audible cues or notifications;
 - no built-in word list, external moderation provider, reporting, mute, or ban workflow;

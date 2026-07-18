@@ -2,6 +2,13 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://midnight-council.local/schemas/websocket-client-event.schema.json",
   "title": "Midnight Council WebSocket Client Event",
+  "$defs": {
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    }
+  },
   "oneOf": [
     {
       "type": "object",
@@ -9,6 +16,7 @@
       "required": ["type", "ready"],
       "properties": {
         "type": { "const": "ready" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "ready": { "type": "boolean" }
       }
     },
@@ -17,7 +25,8 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "const": "start_game" }
+        "type": { "const": "start_game" },
+        "sequence": { "$ref": "#/$defs/sequence" }
       }
     },
     {
@@ -26,6 +35,7 @@
       "required": ["type", "message"],
       "properties": {
         "type": { "const": "chat" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "message": {
           "type": "string",
           "maxLength": 500,
@@ -39,6 +49,7 @@
       "required": ["type", "target_id"],
       "properties": {
         "type": { "const": "night_action" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "target_id": {
           "type": "string",
           "pattern": "\\S"
@@ -50,7 +61,8 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "const": "night_pass" }
+        "type": { "const": "night_pass" },
+        "sequence": { "$ref": "#/$defs/sequence" }
       }
     },
     {
@@ -58,7 +70,8 @@
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "const": "start_vote" }
+        "type": { "const": "start_vote" },
+        "sequence": { "$ref": "#/$defs/sequence" }
       }
     },
     {
@@ -67,6 +80,7 @@
       "required": ["type"],
       "properties": {
         "type": { "const": "vote" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "target_id": { "type": "string" }
       }
     },
@@ -76,6 +90,7 @@
       "required": ["type", "target_id"],
       "properties": {
         "type": { "const": "shoot" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "target_id": {
           "type": "string",
           "pattern": "\\S"
@@ -88,6 +103,7 @@
       "required": ["type", "target_id"],
       "properties": {
         "type": { "const": "transfer_owner" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "target_id": {
           "type": "string",
           "pattern": "\\S"
@@ -100,6 +116,7 @@
       "required": ["type", "target_id"],
       "properties": {
         "type": { "const": "kick_participant" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "target_id": {
           "type": "string",
           "pattern": "\\S"
@@ -112,6 +129,7 @@
       "required": ["type", "locked"],
       "properties": {
         "type": { "const": "set_room_locked" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "locked": { "type": "boolean" }
       }
     },
@@ -121,6 +139,7 @@
       "required": ["type", "max_players"],
       "properties": {
         "type": { "const": "set_player_limit" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "max_players": {
           "type": "integer",
           "minimum": 2,
@@ -145,6 +164,7 @@
       ],
       "properties": {
         "type": { "const": "set_game_settings" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "night_duration": {
           "type": "string",
           "minLength": 1,
@@ -190,6 +210,7 @@
       "required": ["type", "preset"],
       "properties": {
         "type": { "const": "set_game_preset" },
+        "sequence": { "$ref": "#/$defs/sequence" },
         "preset": {
           "enum": ["STANDARD", "QUICK", "BEGINNER", "MINIMAL"]
         }
@@ -198,9 +219,20 @@
     {
       "type": "object",
       "additionalProperties": false,
+      "required": ["type", "afk"],
+      "properties": {
+        "type": { "const": "presence" },
+        "sequence": { "$ref": "#/$defs/sequence" },
+        "afk": { "type": "boolean" }
+      }
+    },
+    {
+      "type": "object",
+      "additionalProperties": false,
       "required": ["type"],
       "properties": {
-        "type": { "const": "return_to_waiting" }
+        "type": { "const": "return_to_waiting" },
+        "sequence": { "$ref": "#/$defs/sequence" }
       }
     }
   ]

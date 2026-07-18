@@ -15,7 +15,8 @@ import (
 var validate = validator.New(validator.WithRequiredStructEnabled())
 
 type ClientEvent struct {
-	Type                  room.EventType  `json:"type" validate:"required,oneof=ready start_game chat night_action night_pass start_vote vote shoot transfer_owner kick_participant set_room_locked set_player_limit set_game_settings set_game_preset return_to_waiting"`
+	Type                  room.EventType  `json:"type" validate:"required,oneof=ready start_game chat night_action night_pass start_vote vote shoot transfer_owner kick_participant set_room_locked set_player_limit set_game_settings set_game_preset presence return_to_waiting"`
+	Sequence              *uint64         `json:"sequence,omitempty" validate:"omitempty,gte=1,lte=9007199254740991"`
 	Ready                 *bool           `json:"ready,omitempty"`
 	Message               string          `json:"message,omitempty"`
 	TargetID              string          `json:"target_id,omitempty"`
@@ -31,6 +32,7 @@ type ClientEvent struct {
 	Detectives            *int            `json:"detectives,omitempty"`
 	Doctors               *int            `json:"doctors,omitempty"`
 	Shooters              *int            `json:"shooters,omitempty"`
+	AFK                   *bool           `json:"afk,omitempty"`
 }
 
 func DecodeClientEvent(reader io.Reader) (ClientEvent, error) {
@@ -62,12 +64,13 @@ func DecodeClientEvent(reader io.Reader) (ClientEvent, error) {
 
 func (e ClientEvent) RoomEvent(playerID, playerName string) room.Event {
 	event := room.Event{
-		Type:       e.Type,
-		PlayerID:   playerID,
-		PlayerName: playerName,
-		Message:    strings.TrimSpace(e.Message),
-		TargetID:   strings.TrimSpace(e.TargetID),
-		GamePreset: e.Preset,
+		Type:           e.Type,
+		PlayerID:       playerID,
+		PlayerName:     playerName,
+		ClientSequence: e.SequenceValue(),
+		Message:        strings.TrimSpace(e.Message),
+		TargetID:       strings.TrimSpace(e.TargetID),
+		GamePreset:     e.Preset,
 	}
 	if e.Ready != nil {
 		event.Ready = *e.Ready
@@ -77,6 +80,9 @@ func (e ClientEvent) RoomEvent(playerID, playerName string) room.Event {
 	}
 	if e.MaxPlayers != nil {
 		event.MaxPlayers = *e.MaxPlayers
+	}
+	if e.AFK != nil {
+		event.AFK = *e.AFK
 	}
 	event.GameSettings = room.GameSettings{
 		Preset:                room.GamePresetCustom,
@@ -166,6 +172,11 @@ func (e ClientEvent) validateShape() error {
 			fieldDoctors,
 			fieldShooters,
 		)
+	case room.EventPresence:
+		if e.AFK == nil {
+			return errors.New("presence event requires afk")
+		}
+		return rejectUnexpectedFields(e, fieldAFK)
 	case room.EventStartGame, room.EventNightPass, room.EventStartVote, room.EventReturnToWaiting:
 		return rejectUnexpectedFields(e)
 	default:
@@ -191,6 +202,8 @@ const (
 	fieldDetectives            clientField = "detectives"
 	fieldDoctors               clientField = "doctors"
 	fieldShooters              clientField = "shooters"
+	fieldSequence              clientField = "sequence"
+	fieldAFK                   clientField = "afk"
 )
 
 func rejectUnexpectedFields(e ClientEvent, allowedFields ...clientField) error {
@@ -198,6 +211,7 @@ func rejectUnexpectedFields(e ClientEvent, allowedFields ...clientField) error {
 	for _, field := range allowedFields {
 		allowed[field] = true
 	}
+	allowed[fieldSequence] = true
 	provided := []struct {
 		field   clientField
 		present bool
@@ -217,6 +231,8 @@ func rejectUnexpectedFields(e ClientEvent, allowedFields ...clientField) error {
 		{field: fieldDetectives, present: e.Detectives != nil},
 		{field: fieldDoctors, present: e.Doctors != nil},
 		{field: fieldShooters, present: e.Shooters != nil},
+		{field: fieldSequence, present: e.Sequence != nil},
+		{field: fieldAFK, present: e.AFK != nil},
 	}
 	for _, candidate := range provided {
 		if candidate.present && !allowed[candidate.field] {
@@ -235,4 +251,11 @@ func intValue(value *int) int {
 
 func boolValue(value *bool) bool {
 	return value != nil && *value
+}
+
+func (e ClientEvent) SequenceValue() uint64 {
+	if e.Sequence == nil {
+		return 0
+	}
+	return *e.Sequence
 }

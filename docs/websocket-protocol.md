@@ -20,13 +20,13 @@ To join or reclaim a spectator identity, add:
 spectator=true
 ```
 
-`room_id`, `player_id`, and `name` must be non-empty. A new player can join only while the room is in `WAITING`; a new spectator can join in any phase. A locked room rejects either kind of new participant. Reconnects are still allowed through a lock and always require the exact reconnect token plus the same player-versus-spectator type, including while another connection for that identity remains active.
+`room_id`, `player_id`, and `name` must be non-empty. A new player can join only while the room is in `WAITING`; a new spectator can join in any phase. A locked room rejects either kind of new participant. Reconnects are still allowed through a lock and always require the exact reconnect token plus the same player-versus-spectator type. When that identity already has an active connection, the newer valid connection replaces it; the old socket receives `connection replaced by a newer session` and policy close code `1008`.
 
 The prototype sends the reconnect token as a query parameter. Deployments must avoid logging raw query strings and should use TLS so WebSocket connections use `wss://`.
 
 ## Client Events
 
-Every client event is one text frame containing exactly one JSON object. Unknown JSON fields, multiple JSON values, unknown event types, and fields not accepted by that event are rejected.
+Every client event is one text frame containing exactly one JSON object. Unknown JSON fields, multiple JSON values, unknown event types, and fields not accepted by that event are rejected. Every event may include an optional positive `sequence` no greater than JavaScript's safe integer maximum (`9007199254740991`). The official browser always includes it.
 
 | Event | Required fields | Optional fields | Meaning |
 | --- | --- | --- | --- |
@@ -44,13 +44,14 @@ Every client event is one text frame containing exactly one JSON object. Unknown
 | `set_player_limit` | `max_players` integer | — | Owner sets the player cap from 2 through 20 while waiting or after a game |
 | `set_game_preset` | `preset` string | — | Owner applies `STANDARD`, `QUICK`, `BEGINNER`, or `MINIMAL` |
 | `set_game_settings` | all setting fields | — | Owner replaces the complete custom game configuration |
+| `presence` | `afk` boolean | — | Publish the participant's current AFK signal |
 | `return_to_waiting` | — | — | Owner resets an active or finished room for a rematch |
 
 Examples and the current event schema are in `README.md` and `docs/websocket-client-event.schema.json`.
 
 ## Server Envelopes
 
-The server sends one of three envelope types.
+The server sends one of four envelope types.
 
 ### State
 
@@ -104,7 +105,7 @@ The server sends one of three envelope types.
 
 The `state` object is identical for all subscribers and is safe to broadcast. Roles are omitted from public player views until `FINISHED`. The `private` object is generated for the receiving player and must never be shown to another player.
 
-Spectators appear only in `state.spectators`, do not consume `max_players`, and receive a private view with `spectator: true`, their reconnect token, and no role or game actions.
+Player and spectator entries expose `connected` and `afk`. A disconnect clears AFK. Spectators appear only in `state.spectators`, do not consume `max_players`, and receive a private view with `spectator: true`, their reconnect token, and no role or game actions.
 
 `available` describes events the UI may offer, but it is not authorization: the server validates the current state again when an event arrives.
 
@@ -127,6 +128,22 @@ Spectators appear only in `state.spectators`, do not consume `max_players`, and 
 
 Chat envelopes are not retained in room snapshots.
 
+### Acknowledgement
+
+Sequenced events receive a connection-private acknowledgement:
+
+```json
+{
+  "type": "ack",
+  "ack": {
+    "sequence": 42,
+    "status": "applied"
+  }
+}
+```
+
+`status` is `applied` after a successful first application, `duplicate` when that participant has already applied the same or a newer sequence, or `rejected` when a validated event fails rate limiting, moderation, or room authorization. A rejected event also receives the normal error envelope. Acknowledgement and broadcast state ordering is not significant; clients correlate by sequence and treat the latest state as authoritative.
+
 ### Error
 
 ```json
@@ -136,7 +153,13 @@ Chat envelopes are not retained in room snapshots.
 }
 ```
 
-Malformed client events and invalid room actions produce an error envelope for that connection. A failed initial join is followed by WebSocket close code `1008`; short public errors are also used as the close reason. Being kicked sends `removed from room by the owner` and closes all sockets subscribed as that participant. Errors from other later game events do not normally close the socket.
+Malformed client events and invalid room actions produce an error envelope for that connection. A failed initial join is followed by WebSocket close code `1008`; short public errors are also used as the close reason. Being kicked sends `removed from room by the owner` and closes the socket. A newer valid connection for the same seat similarly sends `connection replaced by a newer session` and closes the older socket. Errors from other later game events do not normally close the socket.
+
+### Reliable replay and disconnect semantics
+
+The server stores the greatest successfully applied client sequence per player or spectator identity. A repeated sequence is acknowledged as `duplicate` without repeating chat, readiness, presence, or game actions. Sequence values are a deduplication cursor, not authentication; the reconnect token still authorizes the seat.
+
+WebSocket transport loss removes the active subscription and publishes the participant with `connected: false`, but preserves its reconnect token and room seat even in `WAITING`. A normal close with code `1000` and reason `player left` is explicit: it removes a waiting-room identity, while active-game identities remain disconnected so match state cannot be erased. The official browser automatically retries transport loss with its stored token and replays unacknowledged events in sequence order.
 
 ### Per-Connection Rate Limits
 
@@ -195,11 +218,12 @@ Both setting events are owner-only and accepted only in `WAITING` or `FINISHED`.
 ## Room Lifecycle
 
 - The first seated player becomes owner. Ownership can be transferred explicitly to another connected player.
-- If an owner disconnects during an active or finished game, another connected seated player becomes owner when available.
+- If an owner disconnects in any phase, another connected seated player becomes owner when available.
 - Rooms begin unlocked with a 12-player cap. Owners can choose a cap from 2 through 20, but never below current player occupancy.
 - Locking blocks new players and spectators without invalidating existing reconnect tokens.
 - Spectators may join any phase when unlocked. They cannot ready, vote, receive a role, perform actions, or chat during active play.
 - Kicking is restricted to `WAITING` and `FINISHED`; the owner cannot kick their own seat.
+- Network-disconnected identities remain visible and reconnectable; public AFK is independent of transport connection state.
 - `return_to_waiting` is owner-only and valid from active or finished phases. It removes disconnected identities and clears all game-only state while preserving connected participants, reconnect tokens, room lock, and player cap.
 
 ## Phase/Event Matrix
@@ -219,6 +243,7 @@ Both setting events are owner-only and accepted only in `WAITING` or `FINISHED`.
 | `set_player_limit` | owner | no | no | no | owner |
 | `set_game_preset` | owner | no | no | no | owner |
 | `set_game_settings` | owner | no | no | no | owner |
+| `presence` | participant | participant | participant | participant | participant |
 | `return_to_waiting` | no | owner | owner | owner | owner |
 
 The state layer remains authoritative for every condition shown in this table.

@@ -4,6 +4,10 @@
   const SESSION_KEY = "midnight-council.sessions.v1";
   const LAST_NAME_KEY = "midnight-council.last-name.v1";
   const MAX_LOCAL_CHAT_MESSAGES = 150;
+  const MAX_PENDING_EVENTS = 50;
+  const RECONNECT_BASE_DELAY_MS = 500;
+  const RECONNECT_MAX_DELAY_MS = 10000;
+  const AFK_AFTER_MS = 2 * 60 * 1000;
   const presetLabels = {
     STANDARD: "標準",
     QUICK: "快速",
@@ -107,6 +111,15 @@
     serverClockOffset: 0,
     settingsDirty: false,
     renderedSettingsSignature: "",
+    nextClientSequence: 1,
+    pendingEvents: [],
+    reconnectAttempt: 0,
+    reconnectTimer: null,
+    reconnectBlocked: false,
+    activityTimer: null,
+    lastActivityAt: Date.now(),
+    desiredAFK: false,
+    sentAFK: null,
   };
 
   const ui = Object.fromEntries(
@@ -243,8 +256,13 @@
     ui.voteForm.addEventListener("submit", submitVote);
     ui.shootForm.addEventListener("submit", submitShot);
     ui.chatForm.addEventListener("submit", submitChat);
+    for (const eventType of ["pointerdown", "keydown", "touchstart"]) {
+      window.addEventListener(eventType, recordActivity, { passive: true });
+    }
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("beforeunload", () => {
       app.intentionallyClosed = true;
+      clearReconnectTimer();
       app.socket?.close();
     });
   }
@@ -279,36 +297,78 @@
     app.intentionallyClosed = false;
     app.settingsDirty = false;
     app.renderedSettingsSignature = "";
+    app.pendingEvents = restorePendingEvents(session);
+    const highestPendingSequence = app.pendingEvents.reduce(
+      (highest, pending) => Math.max(highest, pending.sequence),
+      0,
+    );
+    app.nextClientSequence = Math.max(
+      positiveSafeInteger(session?.nextClientSequence) || 1,
+      highestPendingSequence + 1,
+    );
+    app.reconnectAttempt = 0;
+    app.reconnectBlocked = false;
+    app.lastActivityAt = Date.now();
+    app.desiredAFK = document.hidden;
+    app.sentAFK = null;
+    clearReconnectTimer();
+    stopActivityTimer();
 
     safeLocalStorageSet(LAST_NAME_KEY, playerName);
     setConnection("connecting", "正在進入議會…");
     ui.joinButton.disabled = true;
 
+    openSocket();
+  }
+
+  function openSocket() {
+    clearReconnectTimer();
+    if (app.intentionallyClosed || app.reconnectBlocked) {
+      return;
+    }
+    const session = getSession(app.roomID);
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const path = `/ws/rooms/${encodeURIComponent(roomID)}`;
+    const path = `/ws/rooms/${encodeURIComponent(app.roomID)}`;
     const query = new URLSearchParams({
       player_id: app.playerID,
-      name: playerName,
+      name: app.playerName,
     });
     if (session?.reconnectToken) {
       query.set("reconnect_token", session.reconnectToken);
     }
-    if (spectator) {
+    if (app.spectator) {
       query.set("spectator", "true");
     }
 
     const socket = new WebSocket(`${protocol}//${window.location.host}${path}?${query}`);
     app.socket = socket;
     socket.addEventListener("open", () => {
-      setConnection("online", "已連線");
+      if (app.socket !== socket) {
+        socket.close();
+        return;
+      }
+      const reconnected = app.reconnectAttempt > 0;
+      app.reconnectAttempt = 0;
+      app.sentAFK = null;
+      setConnection("online", reconnected ? "已重新連線" : "已連線");
+      replayPendingEvents();
+      flushPresence();
     });
-    socket.addEventListener("message", handleEnvelope);
+    socket.addEventListener("message", (event) => {
+      if (app.socket === socket) {
+        handleEnvelope(event);
+      }
+    });
     socket.addEventListener("error", () => {
-      if (!app.state) {
+      if (app.socket === socket && !app.state && app.reconnectAttempt === 0) {
         showJoinError("無法連接遊戲伺服器，請稍後再試。");
       }
     });
-    socket.addEventListener("close", handleSocketClose);
+    socket.addEventListener("close", (event) => {
+      if (app.socket === socket) {
+        handleSocketClose(event);
+      }
+    });
   }
 
   function handleEnvelope(event) {
@@ -330,15 +390,11 @@
         app.private = envelope.private || null;
         app.spectator = app.private?.spectator === true;
         if (app.private?.reconnect_token) {
-          saveSession(app.roomID, {
-            playerID: app.playerID,
-            playerName: app.playerName,
-            reconnectToken: app.private.reconnect_token,
-            spectator: app.private.spectator === true,
-          });
+          saveCurrentSession(app.private.reconnect_token);
         }
         enterGameView();
         render();
+        scheduleActivityTimer();
         break;
       case "chat":
         if (envelope.chat) {
@@ -350,6 +406,9 @@
       case "error":
         handleServerError(envelope.error || "伺服器拒絕了這項操作。");
         break;
+      case "ack":
+        handleEventAck(envelope.ack);
+        break;
       default:
         showToast("收到不支援的伺服器訊息。", true);
     }
@@ -357,9 +416,20 @@
 
   function handleServerError(message) {
     const translated = translateError(message);
+    if (message.includes("connection replaced by a newer session")) {
+      app.reconnectBlocked = true;
+      clearReconnectTimer();
+      setConnection("offline", "連線已被較新的分頁取代");
+      disableGameInputs();
+      ui.leaveButton.disabled = true;
+      showToast(translated, true);
+      return;
+    }
     if (message.includes("removed from room by the owner")) {
       deleteSession(app.roomID);
       app.intentionallyClosed = true;
+      app.reconnectBlocked = true;
+      clearReconnectTimer();
       app.socket?.close();
       app.socket = null;
       app.state = null;
@@ -374,12 +444,30 @@
       showJoinError(translated);
       return;
     }
+    if (message.includes("reconnect token") || message.includes("participant type")) {
+      deleteSession(app.roomID);
+      app.reconnectBlocked = true;
+      clearReconnectTimer();
+      updateResumeNote();
+      if (app.state) {
+        app.socket?.close();
+        app.socket = null;
+        app.state = null;
+        app.private = null;
+        app.chats = [];
+        app.pendingEvents = [];
+        stopCountdown();
+        stopActivityTimer();
+        ui.gameView.hidden = true;
+        ui.joinView.hidden = false;
+        ui.roomId.value = app.roomID;
+        setConnection("offline", "重連資料失效");
+        showJoinError(translated);
+        return;
+      }
+    }
     if (!app.state) {
       showJoinError(translated);
-      if (message.includes("reconnect token") || message.includes("participant type")) {
-        deleteSession(app.roomID);
-        updateResumeNote();
-      }
       return;
     }
     showToast(translated, true);
@@ -387,20 +475,63 @@
 
   function handleSocketClose(event) {
     ui.joinButton.disabled = false;
+    app.socket = null;
+    app.sentAFK = null;
     if (app.intentionallyClosed) {
       setConnection("offline", "尚未連線");
+      return;
+    }
+    if (app.reconnectBlocked) {
+      return;
+    }
+    if (event.code === 1008) {
+      app.reconnectBlocked = true;
+      clearReconnectTimer();
+      setConnection("offline", "伺服器拒絕重新連線");
+      if (app.state) {
+        disableGameInputs();
+        showToast(event.reason ? translateError(event.reason) : "伺服器拒絕重新連線。", true);
+      } else {
+        showJoinError(event.reason ? translateError(event.reason) : "伺服器拒絕連線，請檢查房間資料。");
+      }
       return;
     }
 
     setConnection("offline", "連線中斷");
     stopCountdown(false);
-    if (app.state) {
-      showToast("與伺服器的連線已中斷。重新整理後可使用保存的憑證重連。", true);
+    if (app.state && getSession(app.roomID)?.reconnectToken) {
+      if (app.reconnectAttempt === 0) {
+        showToast("與伺服器的連線已中斷，正在自動重連。", true);
+      }
       disableGameInputs();
+      scheduleReconnect();
     } else if (ui.joinError.hidden) {
       showJoinError(event.reason
         ? translateError(event.reason)
         : "連線已關閉，請確認房間資料後再試一次。");
+    }
+  }
+
+  function scheduleReconnect() {
+    if (app.intentionallyClosed || app.reconnectBlocked || app.reconnectTimer) {
+      return;
+    }
+    app.reconnectAttempt += 1;
+    const delay = Math.min(
+      RECONNECT_MAX_DELAY_MS,
+      RECONNECT_BASE_DELAY_MS * (2 ** Math.min(app.reconnectAttempt - 1, 5)),
+    );
+    setConnection("connecting", `重新連線中（第 ${app.reconnectAttempt} 次）`);
+    app.reconnectTimer = window.setTimeout(() => {
+      app.reconnectTimer = null;
+      openSocket();
+    }, delay);
+  }
+
+  function clearReconnectTimer() {
+    if (app.reconnectTimer) {
+      window.clearTimeout(app.reconnectTimer);
+      app.reconnectTimer = null;
     }
   }
 
@@ -416,11 +547,16 @@
 
   function leaveRoom() {
     app.intentionallyClosed = true;
+    app.reconnectBlocked = true;
+    clearReconnectTimer();
+    stopActivityTimer();
+    deleteSession(app.roomID);
     app.socket?.close(1000, "player left");
     app.socket = null;
     app.state = null;
     app.private = null;
     app.chats = [];
+    app.pendingEvents = [];
     stopCountdown();
     ui.gameView.hidden = true;
     ui.joinView.hidden = false;
@@ -429,13 +565,107 @@
     updateResumeNote();
   }
 
-  function sendEvent(payload) {
+  function sendEvent(payload, quiet = false) {
     if (!app.socket || app.socket.readyState !== WebSocket.OPEN) {
-      showToast("目前未連線，無法送出操作。", true);
+      if (!quiet) {
+        showToast("目前未連線，無法送出操作。", true);
+      }
       return false;
     }
-    app.socket.send(JSON.stringify(payload));
+    if (app.pendingEvents.length >= MAX_PENDING_EVENTS) {
+      if (!quiet) {
+        showToast("等待伺服器確認的操作過多，請等候連線恢復。", true);
+      }
+      return false;
+    }
+
+    const sequence = app.nextClientSequence;
+    app.nextClientSequence += 1;
+    const sequencedPayload = { ...payload, sequence };
+    app.pendingEvents.push(sequencedPayload);
+    persistReliabilityState();
+    try {
+      app.socket.send(JSON.stringify(sequencedPayload));
+    } catch {
+      if (!quiet) {
+        showToast("操作已保留，將在重新連線後再次送出。", true);
+      }
+    }
     return true;
+  }
+
+  function handleEventAck(ack) {
+    const sequence = positiveSafeInteger(ack?.sequence);
+    if (!sequence) {
+      return;
+    }
+    app.pendingEvents = app.pendingEvents.filter((pending) => pending.sequence !== sequence);
+    persistReliabilityState();
+  }
+
+  function replayPendingEvents() {
+    if (!app.socket || app.socket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    for (const pending of app.pendingEvents.slice().sort((left, right) => left.sequence - right.sequence)) {
+      app.socket.send(JSON.stringify(pending));
+    }
+  }
+
+  function recordActivity() {
+    if (!app.state || document.hidden) {
+      return;
+    }
+    app.lastActivityAt = Date.now();
+    app.desiredAFK = false;
+    flushPresence();
+    scheduleActivityTimer();
+  }
+
+  function handleVisibilityChange() {
+    if (!app.state) {
+      return;
+    }
+    if (!document.hidden) {
+      app.lastActivityAt = Date.now();
+    }
+    app.desiredAFK = document.hidden;
+    flushPresence();
+    scheduleActivityTimer();
+  }
+
+  function scheduleActivityTimer() {
+    stopActivityTimer();
+    if (!app.state || document.hidden) {
+      return;
+    }
+    const remaining = AFK_AFTER_MS - (Date.now() - app.lastActivityAt);
+    if (remaining <= 0) {
+      app.desiredAFK = true;
+      flushPresence();
+      return;
+    }
+    app.activityTimer = window.setTimeout(() => {
+      app.activityTimer = null;
+      app.desiredAFK = true;
+      flushPresence();
+    }, remaining);
+  }
+
+  function stopActivityTimer() {
+    if (app.activityTimer) {
+      window.clearTimeout(app.activityTimer);
+      app.activityTimer = null;
+    }
+  }
+
+  function flushPresence() {
+    if (app.sentAFK === app.desiredAFK) {
+      return;
+    }
+    if (sendEvent({ type: "presence", afk: app.desiredAFK }, true)) {
+      app.sentAFK = app.desiredAFK;
+    }
   }
 
   function toggleReady() {
@@ -669,12 +899,14 @@
       if (app.state.phase !== "WAITING") details.push(player.alive ? "存活" : "已出局");
       if (player.role) details.push(roles[player.role]?.name || player.role);
       if (!player.connected) details.push("已斷線");
+      if (player.connected && player.afk) details.push("暫離");
       copy.append(name, element("small", "", details.join(" · ")));
 
       const state = element("span", "player-state");
       state.classList.toggle("ready", app.state.phase === "WAITING" && (player.owner || player.ready));
       state.classList.toggle("connected", app.state.phase !== "WAITING" && player.connected);
-      state.title = player.connected ? "已連線" : "已斷線";
+      state.classList.toggle("afk", player.connected && player.afk);
+      state.title = !player.connected ? "已斷線" : player.afk ? "暫離" : "已連線";
       const actions = element("span", "participant-actions");
       actions.append(state);
       if (canKick && !player.owner) {
@@ -704,12 +936,16 @@
       const avatar = element("span", "player-avatar", initials(spectator.name));
       const copy = element("span", "player-copy");
       const name = element("strong", "", spectator.name + (spectator.id === app.playerID ? "（你）" : ""));
-      copy.append(name, element("small", "", spectator.connected ? "旁觀者" : "旁觀者 · 已斷線"));
+      const spectatorDetails = ["旁觀者"];
+      if (!spectator.connected) spectatorDetails.push("已斷線");
+      if (spectator.connected && spectator.afk) spectatorDetails.push("暫離");
+      copy.append(name, element("small", "", spectatorDetails.join(" · ")));
 
       const actions = element("span", "participant-actions");
       const state = element("span", "player-state");
       state.classList.toggle("connected", spectator.connected);
-      state.title = spectator.connected ? "已連線" : "已斷線";
+      state.classList.toggle("afk", spectator.connected && spectator.afk);
+      state.title = !spectator.connected ? "已斷線" : spectator.afk ? "暫離" : "已連線";
       actions.append(state);
       if (canKick) {
         const remove = element("button", "participant-remove-button", "×");
@@ -1251,6 +1487,7 @@
       ["the room owner cannot be kicked", "房主不能移除自己，請先轉移房主。"],
       ["participants can only be kicked", "只能在等待室或遊戲結束後移除參與者。"],
       ["removed from room by the owner", "你已被房主移出房間。"],
+      ["connection replaced by a newer session", "這個席次已由較新的分頁或裝置接管；本分頁不會再自動重連。"],
       ["new owner must be a connected seated player", "新房主必須是目前在線的玩家。"],
       ["player limit is out of range", "玩家上限必須介於 2 到 20。"],
       ["player limit cannot be below the configured minimum", "玩家上限不能低於遊戲設定的最低人數。"],
@@ -1296,6 +1533,46 @@
 
   function getSession(roomID) {
     return getSessions()[roomID] || null;
+  }
+
+  function saveCurrentSession(reconnectToken = "") {
+    const existing = getSession(app.roomID) || {};
+    const token = reconnectToken || existing.reconnectToken;
+    if (!app.roomID || !token) {
+      return;
+    }
+    saveSession(app.roomID, {
+      playerID: app.playerID,
+      playerName: app.playerName,
+      reconnectToken: token,
+      spectator: app.spectator === true,
+      nextClientSequence: app.nextClientSequence,
+      pendingEvents: app.pendingEvents,
+    });
+  }
+
+  function persistReliabilityState() {
+    saveCurrentSession();
+  }
+
+  function restorePendingEvents(session) {
+    if (!Array.isArray(session?.pendingEvents)) {
+      return [];
+    }
+    const bySequence = new Map();
+    for (const pending of session.pendingEvents) {
+      const sequence = positiveSafeInteger(pending?.sequence);
+      if (sequence && typeof pending?.type === "string") {
+        bySequence.set(sequence, { ...pending, sequence });
+      }
+    }
+    return [...bySequence.values()]
+      .sort((left, right) => left.sequence - right.sequence)
+      .slice(-MAX_PENDING_EVENTS);
+  }
+
+  function positiveSafeInteger(value) {
+    return Number.isSafeInteger(value) && value > 0 ? value : 0;
   }
 
   function saveSession(roomID, session) {

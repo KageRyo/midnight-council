@@ -56,8 +56,7 @@ func (h *Hub) GetOrCreate(roomID string) *Actor {
 		delete(h.rooms, roomID)
 	}
 
-	var actor *Actor
-	actor = newActor(roomID, h.idleTimeout, h.phaseDurations, func() {
+	actor := newActor(roomID, h.idleTimeout, h.phaseDurations, func(actor *Actor) {
 		h.remove(roomID, actor)
 	})
 	h.rooms[roomID] = actor
