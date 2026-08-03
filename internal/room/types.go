@@ -154,6 +154,7 @@ type Snapshot struct {
 	Spectators     []SpectatorView `json:"spectators,omitempty"`
 	Locked         bool            `json:"locked"`
 	MaxPlayers     int             `json:"max_players"`
+	MaxSpectators  int             `json:"max_spectators"`
 	GameSettings   GameSettings    `json:"game_settings"`
 	GamePresets    []GameSettings  `json:"game_presets"`
 	LastWordsID    string          `json:"last_words_player_id,omitempty"`

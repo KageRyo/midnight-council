@@ -12,16 +12,23 @@ import (
 )
 
 const (
-	MinPlayersToStart  = 2
-	DefaultMaxPlayers  = 12
-	MaxPlayersAllowed  = 20
-	MaxChatBytes       = 500
-	MaxEventLogEntries = 100
+	MinPlayersToStart    = 2
+	DefaultMaxPlayers    = 12
+	MaxPlayersAllowed    = 20
+	DefaultMaxSpectators = 24
+	MaxPlayerIDBytes     = 64
+	MaxPlayerNameBytes   = 128
+	MaxPlayerNameRunes   = 32
+	MaxChatBytes         = 500
+	MaxEventLogEntries   = 100
 )
 
 var (
 	ErrPlayerIDRequired        = errors.New("player id is required")
+	ErrInvalidPlayerID         = errors.New("player id must contain 1-64 letters, numbers, hyphens, or underscores")
 	ErrPlayerNameRequired      = errors.New("player name is required")
+	ErrInvalidPlayerName       = errors.New("player name contains invalid characters")
+	ErrPlayerNameTooLong       = errors.New("player name must be at most 32 characters and 128 bytes")
 	ErrPlayerNotFound          = errors.New("player not found")
 	ErrReconnectTokenRequired  = errors.New("reconnect token is required")
 	ErrInvalidReconnectToken   = errors.New("reconnect token is invalid")
@@ -30,6 +37,7 @@ var (
 	ErrRoomNotJoinable         = errors.New("room is not joinable")
 	ErrRoomLocked              = errors.New("room is locked")
 	ErrRoomFull                = errors.New("room player limit has been reached")
+	ErrSpectatorLimitReached   = errors.New("room spectator limit has been reached")
 	ErrWrongPhase              = errors.New("action is not allowed in the current phase")
 	ErrGameFinished            = errors.New("game is already finished")
 	ErrNotEnoughPlayers        = errors.New("not enough players to start")
@@ -72,6 +80,7 @@ type State struct {
 	spectators     map[string]*Spectator
 	locked         bool
 	maxPlayers     int
+	maxSpectators  int
 	round          int
 	nightActions   map[string]NightAction
 	votes          map[string]string
@@ -95,11 +104,18 @@ func newState(roomID string, phaseDurations PhaseDurations) *State {
 }
 
 func newStateWithRuleSet(roomID string, phaseDurations PhaseDurations, rules *RuleSet) *State {
+	return newStateWithLimits(roomID, phaseDurations, rules, DefaultMaxSpectators)
+}
+
+func newStateWithLimits(roomID string, phaseDurations PhaseDurations, rules *RuleSet, maxSpectators int) *State {
 	if err := phaseDurations.Validate(); err != nil {
 		panic(err)
 	}
 	if rules == nil {
 		panic(ErrInvalidRuleSet)
+	}
+	if maxSpectators <= 0 {
+		panic("max spectators must be positive")
 	}
 	now := time.Now().UTC()
 	return &State{
@@ -113,6 +129,7 @@ func newStateWithRuleSet(roomID string, phaseDurations PhaseDurations, rules *Ru
 		players:        make(map[string]*Player),
 		spectators:     make(map[string]*Spectator),
 		maxPlayers:     DefaultMaxPlayers,
+		maxSpectators:  maxSpectators,
 		nightActions:   make(map[string]NightAction),
 		votes:          make(map[string]string),
 		investigations: make(map[string][]InvestigationResult),
@@ -253,6 +270,7 @@ func (s *State) Snapshot() Snapshot {
 		Spectators:     spectators,
 		Locked:         s.locked,
 		MaxPlayers:     s.maxPlayers,
+		MaxSpectators:  s.maxSpectators,
 		GameSettings:   s.gameSettings,
 		GamePresets:    GamePresetCatalog(s.baseDurations),
 		LastWordsID:    s.lastWordsID,
@@ -334,12 +352,12 @@ func (s *State) Personalize(envelope Envelope, playerID string) Envelope {
 }
 
 func (s *State) applyJoin(event Event) (*Envelope, error) {
-	if strings.TrimSpace(event.PlayerID) == "" {
-		return nil, ErrPlayerIDRequired
+	playerID, playerName, err := NormalizeParticipantIdentity(event.PlayerID, event.PlayerName)
+	if err != nil {
+		return nil, err
 	}
-	if strings.TrimSpace(event.PlayerName) == "" {
-		return nil, ErrPlayerNameRequired
-	}
+	event.PlayerID = playerID
+	event.PlayerName = playerName
 
 	player, exists := s.players[event.PlayerID]
 	if exists {
@@ -383,6 +401,9 @@ func (s *State) applyJoin(event Event) (*Envelope, error) {
 	}
 
 	if event.Spectator {
+		if len(s.spectators) >= s.maxSpectators {
+			return nil, ErrSpectatorLimitReached
+		}
 		reconnectToken, err := newReconnectToken()
 		if err != nil {
 			return nil, err

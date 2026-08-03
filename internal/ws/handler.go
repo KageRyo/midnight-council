@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -25,10 +26,13 @@ const (
 )
 
 type Handler struct {
-	hub        *room.Hub
-	upgrader   websocket.Upgrader
-	rateLimits EventRateLimits
-	chatPolicy moderation.ChatPolicy
+	hub              *room.Hub
+	upgrader         websocket.Upgrader
+	rateLimits       EventRateLimits
+	connectionLimits ConnectionLimits
+	admission        *admissionLimiter
+	origins          originPolicy
+	chatPolicy       moderation.ChatPolicy
 }
 
 type HandlerOption func(*Handler)
@@ -36,6 +40,22 @@ type HandlerOption func(*Handler)
 func WithEventRateLimits(limits EventRateLimits) HandlerOption {
 	return func(h *Handler) {
 		h.rateLimits = limits
+	}
+}
+
+func WithConnectionLimits(limits ConnectionLimits) HandlerOption {
+	return func(h *Handler) {
+		h.connectionLimits = limits
+	}
+}
+
+func WithAllowedOrigins(origins []string) HandlerOption {
+	return func(h *Handler) {
+		policy, err := newOriginPolicy(origins)
+		if err != nil {
+			panic(err)
+		}
+		h.origins = policy
 	}
 }
 
@@ -47,14 +67,10 @@ func WithChatPolicy(policy moderation.ChatPolicy) HandlerOption {
 
 func NewHandler(hub *room.Hub, options ...HandlerOption) *Handler {
 	handler := &Handler{
-		hub:        hub,
-		rateLimits: DefaultEventRateLimits(),
-		chatPolicy: moderation.AllowAllChat{},
-		upgrader: websocket.Upgrader{
-			CheckOrigin: func(_ *http.Request) bool {
-				return true
-			},
-		},
+		hub:              hub,
+		rateLimits:       DefaultEventRateLimits(),
+		connectionLimits: DefaultConnectionLimits(),
+		chatPolicy:       moderation.AllowAllChat{},
 	}
 	for _, option := range options {
 		option(handler)
@@ -62,9 +78,14 @@ func NewHandler(hub *room.Hub, options ...HandlerOption) *Handler {
 	if err := handler.rateLimits.Validate(); err != nil {
 		panic(err)
 	}
+	if err := handler.connectionLimits.Validate(); err != nil {
+		panic(err)
+	}
 	if handler.chatPolicy == nil {
 		panic("chat moderation policy is required")
 	}
+	handler.admission = newAdmissionLimiter(handler.connectionLimits)
+	handler.upgrader.CheckOrigin = handler.origins.allows
 	return handler
 }
 
@@ -86,10 +107,26 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if playerID == "" || playerName == "" {
-		http.Error(w, "player_id and name query params are required", http.StatusBadRequest)
+	playerID, playerName, err = room.NormalizeParticipantIdentity(playerID, playerName)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	if reconnectToken != "" && !reconnectTokenPattern.MatchString(reconnectToken) {
+		http.Error(w, "reconnect token is invalid", http.StatusBadRequest)
+		return
+	}
+	creatingRoom := !h.hub.RoomExists(roomID)
+	if creatingRoom && !h.hub.CanCreateRoom() {
+		http.Error(w, room.ErrRoomLimitReached.Error(), http.StatusTooManyRequests)
+		return
+	}
+	release, err := h.admission.acquire(remoteIP(r), creatingRoom, time.Now())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusTooManyRequests)
+		return
+	}
+	defer release()
 
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -97,7 +134,11 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	actor := h.hub.GetOrCreate(roomID)
+	actor, err := h.hub.GetOrCreate(roomID)
+	if err != nil {
+		writeTerminalError(conn, err.Error())
+		return
+	}
 	ctx := r.Context()
 
 	_, err = actor.Dispatch(ctx, room.Event{
@@ -316,8 +357,13 @@ func writeCloseControl(conn *websocket.Conn, message string) {
 func roomIDFromPath(path string) (string, error) {
 	roomID := strings.TrimPrefix(path, "/ws/rooms/")
 	roomID = strings.Trim(roomID, "/")
-	if roomID == "" || roomID == path {
+	if roomID == "" || roomID == path || !roomIDPattern.MatchString(roomID) {
 		return "", errors.New("room id is required")
 	}
 	return roomID, nil
 }
+
+var (
+	roomIDPattern         = regexp.MustCompile(`^[A-Za-z0-9_-]{2,48}$`)
+	reconnectTokenPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+)

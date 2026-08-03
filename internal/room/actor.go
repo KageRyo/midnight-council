@@ -41,15 +41,15 @@ func NewActor(roomID string) *Actor {
 }
 
 func newActor(roomID string, idleTimeout time.Duration, phaseDurations PhaseDurations, onIdle func(*Actor)) *Actor {
-	return newActorWithRuleSet(roomID, idleTimeout, phaseDurations, DefaultRuleSet(), onIdle)
+	return newActorWithRuleSet(roomID, idleTimeout, phaseDurations, DefaultRuleSet(), DefaultMaxSpectators, onIdle)
 }
 
-func newActorWithRuleSet(roomID string, idleTimeout time.Duration, phaseDurations PhaseDurations, rules *RuleSet, onIdle func(*Actor)) *Actor {
+func newActorWithRuleSet(roomID string, idleTimeout time.Duration, phaseDurations PhaseDurations, rules *RuleSet, maxSpectators int, onIdle func(*Actor)) *Actor {
 	actor := &Actor{
 		inbox: make(chan command),
 		done:  make(chan struct{}),
 	}
-	go actor.run(newStateWithRuleSet(roomID, phaseDurations, rules), idleTimeout, onIdle)
+	go actor.run(newStateWithLimits(roomID, phaseDurations, rules, maxSpectators), idleTimeout, onIdle)
 	return actor
 }
 

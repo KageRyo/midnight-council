@@ -2,13 +2,17 @@ package room
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
 
 func TestHubRemovesIdleRoomAfterTimeout(t *testing.T) {
 	hub := NewHub(WithRoomIdleTimeout(20 * time.Millisecond))
-	actor := hub.GetOrCreate("room-1")
+	actor, err := hub.GetOrCreate("room-1")
+	if err != nil {
+		t.Fatalf("get or create room: %v", err)
+	}
 
 	events, unsubscribe, err := actor.Subscribe(context.Background(), "player-1")
 	if err != nil {
@@ -21,7 +25,10 @@ func TestHubRemovesIdleRoomAfterTimeout(t *testing.T) {
 		return hub.RoomCount() == 0
 	})
 
-	recreated := hub.GetOrCreate("room-1")
+	recreated, err := hub.GetOrCreate("room-1")
+	if err != nil {
+		t.Fatalf("recreate room: %v", err)
+	}
 	if recreated == actor {
 		t.Fatal("expected idle room to be recreated with a new actor")
 	}
@@ -29,7 +36,10 @@ func TestHubRemovesIdleRoomAfterTimeout(t *testing.T) {
 
 func TestHubKeepsRoomWithActiveSubscriber(t *testing.T) {
 	hub := NewHub(WithRoomIdleTimeout(20 * time.Millisecond))
-	actor := hub.GetOrCreate("room-1")
+	actor, err := hub.GetOrCreate("room-1")
+	if err != nil {
+		t.Fatalf("get or create room: %v", err)
+	}
 
 	events, unsubscribe, err := actor.Subscribe(context.Background(), "player-1")
 	if err != nil {
@@ -46,12 +56,28 @@ func TestHubKeepsRoomWithActiveSubscriber(t *testing.T) {
 
 func TestHubReplacesClosedActor(t *testing.T) {
 	hub := NewHub(WithRoomIdleTimeout(0))
-	actor := hub.GetOrCreate("room-1")
+	actor, err := hub.GetOrCreate("room-1")
+	if err != nil {
+		t.Fatalf("get or create room: %v", err)
+	}
 	actor.close()
 
-	recreated := hub.GetOrCreate("room-1")
+	recreated, err := hub.GetOrCreate("room-1")
+	if err != nil {
+		t.Fatalf("recreate room: %v", err)
+	}
 	if recreated == actor {
 		t.Fatal("expected closed actor to be replaced")
+	}
+}
+
+func TestHubRejectsNewRoomWhenAtCapacity(t *testing.T) {
+	hub := NewHub(WithMaxRooms(1))
+	if _, err := hub.GetOrCreate("first"); err != nil {
+		t.Fatalf("create first room: %v", err)
+	}
+	if _, err := hub.GetOrCreate("second"); !errors.Is(err, ErrRoomLimitReached) {
+		t.Fatalf("second room error = %v, want %v", err, ErrRoomLimitReached)
 	}
 }
 

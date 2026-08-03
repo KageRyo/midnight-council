@@ -40,12 +40,45 @@ func main() {
 	if err := rateLimits.Validate(); err != nil {
 		log.Fatalf("invalid WebSocket rate limit configuration: %v", err)
 	}
+	connectionLimits := ws.ConnectionLimits{
+		Connections: ws.RateLimit{
+			EventsPerSecond: getenvFloat64("WS_CONNECTIONS_PER_SECOND", ws.DefaultConnectionsPerSecond),
+			Burst:           getenvInt("WS_CONNECTION_BURST", ws.DefaultConnectionBurst),
+		},
+		MaxPerIP: getenvInt("WS_MAX_CONNECTIONS_PER_IP", ws.DefaultMaxConnectionsPerIP),
+		RoomCreates: ws.RateLimit{
+			EventsPerSecond: getenvFloat64("WS_ROOM_CREATIONS_PER_SECOND", ws.DefaultRoomCreationsPerSecond),
+			Burst:           getenvInt("WS_ROOM_CREATION_BURST", ws.DefaultRoomCreationBurst),
+		},
+	}
+	if err := connectionLimits.Validate(); err != nil {
+		log.Fatalf("invalid WebSocket connection limit configuration: %v", err)
+	}
+	allowedOrigins, err := ws.ParseAllowedOrigins(os.Getenv("ALLOWED_ORIGINS"))
+	if err != nil {
+		log.Fatalf("invalid ALLOWED_ORIGINS configuration: %v", err)
+	}
+	maxRooms := getenvInt("MAX_ROOMS", room.DefaultMaxRooms)
+	if maxRooms <= 0 {
+		log.Fatal("MAX_ROOMS must be positive")
+	}
+	maxSpectators := getenvInt("MAX_SPECTATORS_PER_ROOM", room.DefaultMaxSpectators)
+	if maxSpectators <= 0 {
+		log.Fatal("MAX_SPECTATORS_PER_ROOM must be positive")
+	}
 
 	hub := room.NewHub(
 		room.WithRoomIdleTimeout(roomIdleTimeout),
 		room.WithPhaseDurations(phaseDurations),
+		room.WithMaxRooms(maxRooms),
+		room.WithMaxSpectators(maxSpectators),
 	)
-	handler := ws.NewHandler(hub, ws.WithEventRateLimits(rateLimits))
+	handler := ws.NewHandler(
+		hub,
+		ws.WithEventRateLimits(rateLimits),
+		ws.WithConnectionLimits(connectionLimits),
+		ws.WithAllowedOrigins(allowedOrigins),
+	)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -63,9 +96,12 @@ func main() {
 
 	go func() {
 		log.Printf(
-			"midnight-council game server listening on %s with room idle timeout %s, phase durations night=%s discussion=%s voting=%s last_words=%s, and WebSocket rate limits chat=%g/s burst=%d game=%g/s burst=%d",
+			"midnight-council game server listening on %s with room idle timeout %s, room cap=%d, spectator cap=%d, allowed origins=%d, phase durations night=%s discussion=%s voting=%s last_words=%s, and WebSocket rate limits chat=%g/s burst=%d game=%g/s burst=%d connection=%g/s burst=%d per_ip=%d room_create=%g/s burst=%d",
 			addr,
 			roomIdleTimeout,
+			maxRooms,
+			maxSpectators,
+			len(allowedOrigins),
 			phaseDurations.Night,
 			phaseDurations.DayDiscussion,
 			phaseDurations.DayVoting,
@@ -74,6 +110,11 @@ func main() {
 			rateLimits.Chat.Burst,
 			rateLimits.Game.EventsPerSecond,
 			rateLimits.Game.Burst,
+			connectionLimits.Connections.EventsPerSecond,
+			connectionLimits.Connections.Burst,
+			connectionLimits.MaxPerIP,
+			connectionLimits.RoomCreates.EventsPerSecond,
+			connectionLimits.RoomCreates.Burst,
 		)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server failed: %v", err)
