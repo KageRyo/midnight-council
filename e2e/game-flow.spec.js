@@ -55,7 +55,9 @@ test("four players can complete a private-role game and reset for a rematch", as
       await expect(participant.page.locator("#phase-label")).toHaveText("白天討論");
     }
 
-    const reconnectingParticipant = participants.find((participant) => participant !== killerParticipant);
+    const reconnectingParticipant = participants.find(
+      (participant) => participant !== owner && participant !== killerParticipant,
+    );
     await reconnectingParticipant.page.reload();
     await reconnectingParticipant.page.locator("#join-button").click();
     await expect(reconnectingParticipant.page.locator("#connection-label")).toHaveText("已連線");
