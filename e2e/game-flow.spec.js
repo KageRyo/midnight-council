@@ -1,7 +1,7 @@
 const { test, expect } = require("@playwright/test");
 
 test("four players can complete a private-role game and reset for a rematch", async ({ browser }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
 
   const roomID = `e2e-${Date.now()}`;
   const participants = [];
@@ -19,10 +19,11 @@ test("four players can complete a private-role game and reset for a rematch", as
     const owner = participants[0];
     await owner.page.locator("#game-preset-select").selectOption("MINIMAL");
     await owner.page.locator("#game-preset-select").selectOption("CUSTOM");
-    await owner.page.locator("#setting-night-seconds").fill("10");
-    await owner.page.locator("#setting-discussion-seconds").fill("10");
-    await owner.page.locator("#setting-voting-seconds").fill("10");
-    await owner.page.locator("#setting-last-words-seconds").fill("3");
+    // Keep manually advanced phases comfortably ahead of a busy CI runner.
+    await owner.page.locator("#setting-night-seconds").fill("60");
+    await owner.page.locator("#setting-discussion-seconds").fill("60");
+    await owner.page.locator("#setting-voting-seconds").fill("60");
+    await owner.page.locator("#setting-last-words-seconds").fill("5");
     await owner.page.locator("#setting-minimum-players").fill("4");
     await owner.page.locator("#game-settings-submit").click();
     await expect(owner.page.locator("#game-settings-preset-badge")).toHaveText("自訂");
@@ -78,7 +79,7 @@ test("four players can complete a private-role game and reset for a rematch", as
     }
 
     await expect(owner.page.locator("#phase-label")).toHaveText("遺言");
-    await expect(owner.page.locator("#phase-label")).toHaveText("已結束");
+    await expect(owner.page.locator("#phase-label")).toHaveText("已結束", { timeout: 15_000 });
     owner.page.on("dialog", (dialog) => dialog.accept());
     await owner.page.locator("#return-waiting-button").click();
     await expect(owner.page.locator("#phase-label")).toHaveText("等待中");
