@@ -16,7 +16,7 @@ internal/ws.Handler               connection lifecycle and transport
 internal/protocol                 strict client-event decoding
              │
              ▼
-internal/ws connection limiter   chat/game token buckets
+internal/ws admission controls   origin policy, identifiers, IP limits, chat/game buckets
              │
              ▼
 internal/moderation.ChatPolicy   allow/reject/replace chat
@@ -59,6 +59,7 @@ The client has no build step or third-party runtime dependency. It renders serve
 - Writes have a 10-second deadline.
 - A transport loss marks the active participant disconnected without deleting its seat; an explicit normal close with reason `player left` performs the permanent waiting-room leave path.
 - Each connection has independent chat and game-event token buckets.
+- Every direct IP is subject to a connection admission rate, simultaneous-connection cap, and new-room creation rate.
 - The `spectator=true` query parameter creates or reclaims a spectator identity instead of a player seat.
 
 Only text events that pass protocol decoding and shape validation reach the connection limiter. Chat consumes the chat bucket; every other accepted client event consumes the game bucket. An event with no token is answered with an error envelope and is never dispatched to the room actor. Invalid JSON and schema errors also never reach the actor.
@@ -67,11 +68,13 @@ An initial join rejection writes an error envelope and then closes the WebSocket
 
 Buckets start at burst capacity. Chat defaults to one token per second with a burst of five; game events default to five tokens per second with a burst of ten. `WS_CHAT_EVENTS_PER_SECOND`, `WS_CHAT_BURST`, `WS_GAME_EVENTS_PER_SECOND`, and `WS_GAME_BURST` override these positive values at startup. Limits are process-local and connection-local, so a new WebSocket receives fresh buckets; cross-instance and account-wide controls remain future infrastructure concerns.
 
+Before the upgrade, the handler validates a room ID as 2–48 ASCII letters, numbers, hyphens, or underscores. Player IDs accept the same character set up to 64 bytes. Display names must be valid UTF-8, contain no controls, fit both 32 runes and 128 bytes, and are trimmed before a seat lookup. This avoids accepting identities that the browser would reject and bounds in-memory key and projection sizes.
+
 After rate limiting, chat events pass through `moderation.ChatPolicy`. A policy receives room and player metadata plus the validated message, then returns allow, reject, or replace. Replacement text is trimmed and revalidated against the server's non-empty and 500-byte rules before dispatch. Rejections produce an error only for the sender. Policy errors, unsupported decisions, and invalid replacements fail closed; the transport logs the failure without logging message content and returns a generic availability error.
 
 `moderation.AllowAllChat` is the default, so the hook does not alter existing gameplay until a deployment supplies another policy with `ws.WithChatPolicy`. The policy boundary is intentionally separate from room state: rejected text never enters the actor, while accepted or replaced text still passes through normal room authorization such as the dead-player chat rule.
 
-The WebSocket upgrader currently accepts every HTTP origin. This is suitable for the prototype and local client, but an explicit deployment-origin allowlist is required before exposing authenticated sessions publicly.
+The WebSocket upgrader permits same-host browser origins by default. `ALLOWED_ORIGINS` provides an exact comma-separated `http`/`https` allowlist for a public deployment; wildcards are unsupported. Requests without an `Origin` header remain available to non-browser tooling. Connection and room-creation limits use the direct network peer and do not trust forwarded-address headers, so production deployments should restrict direct access to the application and enforce complementary limits at the reverse proxy. See [`deployment.md`](deployment.md) for all limit variables.
 
 ### Protocol validation
 
@@ -148,7 +151,7 @@ Changing settings clears every non-owner readiness flag so players must acknowle
 
 ## Room Lifecycle and Participants
 
-The state distinguishes seated players from spectators. Players count toward the room's player cap and can receive roles; spectators have their own public list and private reconnect token but never receive a role or game action. A new player may join only in `WAITING`, while a new spectator may join during any phase. A locked room rejects both kinds of new participant but still permits a valid reconnect.
+The state distinguishes seated players from spectators. Players count toward the room's player cap and can receive roles; spectators have their own public list and private reconnect token but never receive a role or game action. A new player may join only in `WAITING`, while a new spectator may join during any phase. A locked room rejects both kinds of new participant but still permits a valid reconnect. `MAX_SPECTATORS_PER_ROOM` bounds spectator identities, and `MAX_ROOMS` bounds in-memory actors for the process.
 
 Rooms default to 12 player seats and owners may choose a limit from 2 through 20 while waiting or after a game. Spectators do not consume player capacity. Owners may lock or unlock the room in any phase, explicitly transfer ownership to a connected seated player, and kick a player or spectator while waiting or after a game. When the owner disconnects in any phase, ownership moves to another connected seated player when one exists.
 

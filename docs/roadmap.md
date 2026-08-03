@@ -41,17 +41,24 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 - Registry-backed role capabilities and ordered night-action resolution
 - Escort role with action blocking and an advanced preset
 - Server-authoritative last-words phase with speaker-only timed chat
+- Portable Dockerfile, Docker Compose configuration, and environment example
+- GitHub Actions checks for formatting, vet, tests, race detection, JavaScript syntax, and browser E2E
+- Same-host WebSocket origin policy with an exact deployment allowlist
+- Server-side room ID and participant identity limits
+- Per-IP connection admission, per-IP room-creation limits, global room cap, and spectator cap
+- Playwright four-browser multiplayer, reconnect, settlement, and rematch flow
+- Configurable Go WebSocket load-test harness
 
 ## Next Tasks
 
-1. Add a registry-backed alternate win mode or another role with a distinct faction interaction.
-2. Add Docker Compose for local deployment.
-3. Add GitHub Actions for `make test`.
-4. Add a load test script for WebSocket rooms.
-5. Add JWT authentication for persistent accounts.
-6. Add PostgreSQL persistence for accounts, game summaries, and audit logs.
+1. Run the load harness in a controlled environment and publish reproducible latency, memory, CPU, and reconnect measurements.
+2. Add a registry-backed alternate win mode or another role with a distinct faction interaction.
+3. Add deployment monitoring, structured request metrics, and alerting.
+4. Add JWT authentication for persistent accounts.
+5. Add PostgreSQL persistence for accounts, game summaries, and audit logs.
+6. Add report, mute, and ban workflows backed by moderation policy.
 7. Add Redis Pub/Sub support for future multi-instance room routing.
 
 ## Current Priority
 
-The role registry now centralizes faction, night ability, action priority, target policy, day ability, deck construction, investigation alignment, and win counting. Vote executions now include server-authoritative last words before delayed win evaluation. The next game-rule expansion should prove alternate win handling or another distinct faction interaction on top of this foundation.
+The playable prototype now has a reproducible local container path, CI evidence, browser-flow coverage, and bounded WebSocket admission. The immediate priority is producing controlled load-test evidence and observability before growing the game rules or exposing it to a wider audience.

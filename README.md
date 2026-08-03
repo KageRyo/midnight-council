@@ -4,6 +4,27 @@ Midnight Council is a browser-based, real-time social deduction game prototype i
 
 The Go server and its embedded web client already support a repeatable playable loop: nickname-based player or spectator join, room readiness and administration, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, timed last words, win detection, settlement, return to waiting, rematches, and reconnect-token based disconnect/reconnect.
 
+![Midnight Council architecture](docs/assets/architecture.svg)
+
+## Quick Start
+
+Run the complete game with Docker Compose:
+
+```bash
+docker compose up --build
+```
+
+Then open `http://localhost:8080` and use an incognito window or another browser profile to join the same room as a second player.
+
+For native development, install Go `1.26.4` or newer and run:
+
+```bash
+make test
+make run
+```
+
+The browser client is embedded in the Go binary; there is no frontend build step. See [`docs/deployment.md`](docs/deployment.md) for configuration, reverse-proxy guidance, and the included WebSocket load-test harness. A reproducible local `100 rooms × 10 players` baseline is available in [`docs/benchmarks.md`](docs/benchmarks.md).
+
 ## Current Scope
 
 - Go HTTP/WebSocket game server
@@ -50,25 +71,30 @@ Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, built-in mod
 
 See [`docs/architecture.md`](docs/architecture.md), [`docs/web-client.md`](docs/web-client.md), [`docs/websocket-protocol.md`](docs/websocket-protocol.md), and [`docs/roadmap.md`](docs/roadmap.md) for design details and upcoming work.
 
-## Local Toolchain
+## Development and Verification
 
-This repo uses a project-local conda environment for Go:
-
-```bash
-conda activate /mnt/8tb_hdd/ryo/midnight-council/.conda-go
-```
-
-Run tests:
+The Make targets use the `go` executable on your `PATH`; no project-specific conda path is required.
 
 ```bash
+make fmt
+make fmt-check
+make vet
 make test
+make test-race
+make js-check
 ```
 
-Run the server:
+`make test-race` needs a Go toolchain with its normal C toolchain support. The GitHub Actions workflow runs formatting, vet, unit/integration tests, race detection, JavaScript syntax validation, and the browser E2E suite on every push to `main` and every pull request.
+
+Install the test-only browser dependency to run the same E2E suite locally:
 
 ```bash
-make run
+npm ci
+npx playwright install chromium
+npm run test:e2e
 ```
+
+The Playwright scenario uses four independent browser contexts to cover joining, private role projection, a night action, reconnect-token recovery, voting, game settlement, and a same-room rematch.
 
 The server listens on `:8080` by default. Override with `ADDR`:
 
@@ -112,6 +138,8 @@ Rates may be fractional, and every rate and burst must be positive. Buckets star
 WS_CHAT_EVENTS_PER_SECOND=0.5 WS_CHAT_BURST=2 WS_GAME_EVENTS_PER_SECOND=2 WS_GAME_BURST=4 make run
 ```
 
+Before public deployment, configure the exact browser origins and admission limits described in [`docs/deployment.md`](docs/deployment.md). The server defaults to same-host WebSocket origins, validates room and participant identifiers server-side, limits new connections and room creation per direct IP, caps room actors globally, and caps spectators per room.
+
 Validated, rate-limited chat is then passed to a `moderation.ChatPolicy` before room dispatch. The policy can allow the original message, reject it with an optional public reason, or replace it. The server defaults to `moderation.AllowAllChat`; deployments can inject another implementation through `ws.WithChatPolicy`. Policy failures and invalid replacements fail closed and never broadcast the original message.
 
 Open the game client after starting the server:
@@ -121,12 +149,6 @@ http://localhost:8080
 ```
 
 Use separate browser profiles or private windows when testing multiple players on one computer. Tabs in the same browser profile intentionally share the saved seat for a room.
-
-The explicit Go command used by `make test` is:
-
-```bash
-CGO_ENABLED=0 GOCACHE=/tmp/go-build GOPATH=/tmp/go ./.conda-go/bin/go test ./...
-```
 
 ## Browser Client
 

@@ -20,7 +20,7 @@ To join or reclaim a spectator identity, add:
 spectator=true
 ```
 
-`room_id`, `player_id`, and `name` must be non-empty. A new player can join only while the room is in `WAITING`; a new spectator can join in any phase. A locked room rejects either kind of new participant. Reconnects are still allowed through a lock and always require the exact reconnect token plus the same player-versus-spectator type. When that identity already has an active connection, the newer valid connection replaces it; the old socket receives `connection replaced by a newer session` and policy close code `1008`.
+`room_id` must be 2–48 ASCII letters, numbers, hyphens, or underscores. `player_id` accepts that same character set up to 64 bytes. `name` is trimmed and must be valid UTF-8 without control characters, at most 32 runes and 128 bytes. A new player can join only while the room is in `WAITING`; a new spectator can join in any phase. A locked room rejects either kind of new participant. Reconnects are still allowed through a lock and always require the exact reconnect token plus the same player-versus-spectator type. When that identity already has an active connection, the newer valid connection replaces it; the old socket receives `connection replaced by a newer session` and policy close code `1008`.
 
 The prototype sends the reconnect token as a query parameter. Deployments must avoid logging raw query strings and should use TLS so WebSocket connections use `wss://`.
 
