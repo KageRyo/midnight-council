@@ -1,14 +1,27 @@
-GO ?= ./.conda-go/bin/go
-GO_ENV := CGO_ENABLED=0 GOCACHE=/tmp/go-build GOPATH=/tmp/go
+GO ?= go
 
-.PHONY: fmt test run
+.PHONY: build fmt fmt-check vet test test-race js-check run
 
 fmt:
-	$(GO)fmt -w cmd internal
+	$(GO) fmt ./...
+
+fmt-check:
+	@test -z "$$($(GO)fmt -l cmd internal)" || (echo "Go files are not formatted; run 'make fmt'." && exit 1)
+
+vet:
+	$(GO) vet ./...
 
 test:
-	$(GO_ENV) $(GO) test ./...
+	CGO_ENABLED=0 $(GO) test ./...
+
+test-race:
+	$(GO) test -race ./...
+
+js-check:
+	node --check internal/webui/static/app.js
+
+build:
+	CGO_ENABLED=0 $(GO) build ./cmd/server
 
 run:
-	$(GO_ENV) $(GO) run ./cmd/server
-
+	$(GO) run ./cmd/server

@@ -1,0 +1,10 @@
+.git
+.github
+.conda-go
+.playwright-cli
+node_modules
+output
+.env
+.env.*
+!/.env.example
+AGENTS.md
