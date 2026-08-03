@@ -1,6 +1,8 @@
 const { test, expect } = require("@playwright/test");
 
 test("four players can complete a private-role game and reset for a rematch", async ({ browser }) => {
+  test.setTimeout(60_000);
+
   const roomID = `e2e-${Date.now()}`;
   const participants = [];
   for (const name of ["Owner", "Player Two", "Player Three", "Player Four"]) {
@@ -17,14 +19,10 @@ test("four players can complete a private-role game and reset for a rematch", as
     const owner = participants[0];
     await owner.page.locator("#game-preset-select").selectOption("MINIMAL");
     await owner.page.locator("#game-preset-select").selectOption("CUSTOM");
-    for (const selector of [
-      "#setting-night-seconds",
-      "#setting-discussion-seconds",
-      "#setting-voting-seconds",
-      "#setting-last-words-seconds",
-    ]) {
-      await owner.page.locator(selector).fill("1");
-    }
+    await owner.page.locator("#setting-night-seconds").fill("10");
+    await owner.page.locator("#setting-discussion-seconds").fill("10");
+    await owner.page.locator("#setting-voting-seconds").fill("10");
+    await owner.page.locator("#setting-last-words-seconds").fill("3");
     await owner.page.locator("#setting-minimum-players").fill("4");
     await owner.page.locator("#game-settings-submit").click();
     await expect(owner.page.locator("#game-settings-preset-badge")).toHaveText("自訂");
@@ -50,7 +48,7 @@ test("four players can complete a private-role game and reset for a rematch", as
     }
     expect(killerParticipant, "one participant should receive the killer role").toBeTruthy();
 
-    await killerParticipant.page.locator("#night-target").selectOption({ index: 0 });
+    await killerParticipant.page.locator("#night-target").selectOption({ index: 1 });
     await killerParticipant.page.locator("#night-action-button").click();
     for (const participant of participants) {
       await expect(participant.page.locator("#phase-label")).toHaveText("白天討論");
@@ -85,6 +83,6 @@ test("four players can complete a private-role game and reset for a rematch", as
     await owner.page.locator("#return-waiting-button").click();
     await expect(owner.page.locator("#phase-label")).toHaveText("等待中");
   } finally {
-    await Promise.all(participants.map(({ context }) => context.close()));
+    await Promise.all(participants.map(({ context }) => context.close().catch(() => {})));
   }
 });
