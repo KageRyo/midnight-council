@@ -4,7 +4,17 @@ Midnight Council is a browser-based, real-time social deduction game prototype i
 
 The Go server and its embedded web client already support a repeatable playable loop: nickname-based player or spectator join, room readiness and administration, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, timed last words, win detection, settlement, return to waiting, rematches, and reconnect-token based disconnect/reconnect.
 
-![Midnight Council architecture](docs/assets/architecture.svg)
+```mermaid
+flowchart LR
+    Browser[Browser client] -->|HTTP / WebSocket| Edge[WebSocket edge]
+    Edge --> Protocol[Strict protocol validation]
+    Protocol --> Admission[Origin, identity, and IP admission]
+    Admission --> Moderation[Chat policy]
+    Moderation --> Hub[Room hub]
+    Hub --> Actor[Room actor]
+    Actor --> State[Authoritative game state]
+    State -->|Personalized public and private snapshots| Browser
+```
 
 ## Quick Start
 
