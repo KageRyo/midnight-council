@@ -10,7 +10,7 @@ docker compose up --build
 
 Open `http://localhost:8080`. Copy [`.env.example`](../.env.example) to `.env` only when you need to change a default.
 
-For native development, install Go `1.26.4` or newer and run:
+For native development, install Go `1.26.6` or newer and run:
 
 ```bash
 make run

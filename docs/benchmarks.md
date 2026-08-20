@@ -20,7 +20,7 @@ The harness sent one `presence` event and one `chat` event from each connected c
 ### Environment
 
 - Linux `x86_64`, Intel Xeon W-2255 (20 logical CPUs), 125 GiB memory (87 GiB available at collection).
-- Go `1.26.4`.
+- Go `1.26.4` (historical baseline; current development should use Go `1.26.6` or newer).
 - Local server on `127.0.0.1:18081`.
 - Server settings: `MAX_ROOMS=120`, `WS_MAX_CONNECTIONS_PER_IP=1200`, `WS_CONNECTIONS_PER_SECOND=1000`, `WS_CONNECTION_BURST=1200`, `WS_ROOM_CREATIONS_PER_SECOND=100`, `WS_ROOM_CREATION_BURST=120`.
 - Command: `go run ./cmd/loadtest -target ws://127.0.0.1:18081 -rooms 100 -players 10 -workers 100 -hold 5s`.

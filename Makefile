@@ -1,12 +1,19 @@
 GO ?= go
+GOVULNCHECK_VERSION ?= v1.1.4
 
-.PHONY: build fmt fmt-check vet test test-race js-check run
+.PHONY: build fmt fmt-check mod-verify vuln vet test test-race js-check run
 
 fmt:
 	$(GO) fmt ./...
 
 fmt-check:
 	@test -z "$$($(GO)fmt -l cmd internal)" || (echo "Go files are not formatted; run 'make fmt'." && exit 1)
+
+mod-verify:
+	$(GO) mod verify
+
+vuln:
+	$(GO) run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
 
 vet:
 	$(GO) vet ./...
