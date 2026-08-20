@@ -74,7 +74,7 @@ After rate limiting, chat events pass through `moderation.ChatPolicy`. A policy 
 
 `moderation.AllowAllChat` is the default, so the hook does not alter existing gameplay until a deployment supplies another policy with `ws.WithChatPolicy`. The policy boundary is intentionally separate from room state: rejected text never enters the actor, while accepted or replaced text still passes through normal room authorization such as the dead-player chat rule.
 
-The WebSocket upgrader permits same-host browser origins by default. `ALLOWED_ORIGINS` provides an exact comma-separated `http`/`https` allowlist for a public deployment; wildcards are unsupported. Requests without an `Origin` header remain available to non-browser tooling. Connection and room-creation limits use the direct network peer and do not trust forwarded-address headers, so production deployments should restrict direct access to the application and enforce complementary limits at the reverse proxy. See [`deployment.md`](deployment.md) for all limit variables.
+The WebSocket upgrader permits same-host browser origins by default. `ALLOWED_ORIGINS` provides an exact comma-separated `http`/`https` allowlist for a public deployment; wildcards are unsupported. Requests without an `Origin` header remain available to non-browser tooling. Connection and room-creation limits use the direct network peer unless it matches an address or CIDR in `TRUSTED_PROXIES`; only then are `X-Forwarded-For` or `Forwarded` addresses used. Production deployments should restrict direct access to the application and enforce complementary limits at the reverse proxy. See [`deployment.md`](deployment.md) for all limit variables.
 
 ### Protocol validation
 
