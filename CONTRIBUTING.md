@@ -21,16 +21,28 @@ Use a lowercase type such as `feat`, `fix`, `docs`, `test`, `refactor`, `build`,
 
 Prefer segmented commits. Keep unrelated changes in separate commits so each commit has one clear purpose. Write descriptions in the imperative mood and do not end them with a period.
 
+## Branches and pull requests
+
+Start new work from `main` and use a descriptive branch name such as `feature/short-name` or `fix/short-name`. Keep pull requests focused and describe the user-visible behavior, design decisions, related issues, and any compatibility or security impact.
+
+Use the pull-request checklist as a final review pass. Do not include credentials, reconnect tokens, private deployment details, generated browser artifacts, or unrelated local files. Report security vulnerabilities through [`SECURITY.md`](SECURITY.md) instead of a public issue or pull request.
+
 ## Before Push
 
-Run unit tests before every push:
+Run the relevant checks before every push:
 
 ```bash
 make fmt
+make fmt-check
+make mod-verify
+make vet
 make test
+make test-race
+make js-check
+make vuln
 ```
 
-Do not push if unit tests are failing.
+The vulnerability check requires network access to download `govulncheck` and its database. Do not push if a required check is failing. When changing the WebSocket or browser flow, also run the Playwright suite described in [`README.md`](README.md).
 
 When changing `internal/webui/static/app.js` and Node.js is available, also run:
 
