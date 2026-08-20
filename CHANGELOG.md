@@ -11,3 +11,5 @@ Release notes follow the release and maintenance conventions in [`docs/release.m
 - Dependency integrity, vulnerability, and container image checks in CI.
 - Dependabot coverage for Go modules, npm, GitHub Actions, and Docker.
 - The `Midnight Council vX.Y.Z` GitHub Release title convention.
+- Apache-2.0 source licensing, attribution, and trademark policy documentation.
+- GitHub Flow contribution guidance.

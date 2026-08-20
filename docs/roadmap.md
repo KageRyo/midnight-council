@@ -53,10 +53,11 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 - Public container PaaS deployment runbook
 - Experimental project status, contributor guidance, security policy, and community health files
 - Dependency integrity, `govulncheck`, and container vulnerability checks in CI
+- Apache-2.0 source license, attribution notice, trademark policy, and release naming convention
 
 ## Next Tasks
 
-1. Decide the software license and publication scope before making the repository public.
+1. Finalize the publication scope and repository visibility before making the repository public.
 2. Run the load harness in a controlled environment and publish reproducible latency, memory, CPU, and reconnect measurements.
 3. Add a registry-backed alternate win mode or another role with a distinct faction interaction.
 4. Add deployment monitoring, structured request metrics, and alerting.
@@ -67,4 +68,4 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 
 ## Current Priority
 
-The playable prototype now has a reproducible local container path, CI evidence, browser-flow coverage, bounded WebSocket admission, trusted proxy handling, a public container PaaS runbook, and initial open-source readiness checks. The immediate next step is to decide the licensing and publication boundary, then gather controlled single-instance deployment evidence before considering a public service or multi-process scaling.
+The playable prototype now has a reproducible local container path, CI evidence, browser-flow coverage, bounded WebSocket admission, trusted proxy handling, a public container PaaS runbook, an Apache-2.0 source license, and initial open-source readiness checks. The immediate next step is to finalize the publication boundary and gather controlled single-instance deployment evidence before considering a public service or multi-process scaling.

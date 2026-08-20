@@ -27,6 +27,19 @@ Start new work from `main` and use a descriptive branch name such as `feature/sh
 
 Use the pull-request checklist as a final review pass. Do not include credentials, reconnect tokens, private deployment details, generated browser artifacts, or unrelated local files. Report security vulnerabilities through [`SECURITY.md`](SECURITY.md) instead of a public issue or pull request.
 
+## GitHub Flow
+
+This project follows GitHub Flow:
+
+1. Start from an up-to-date `main` branch and create a short-lived feature or fix branch.
+2. Make focused commits and keep the branch limited to one coherent change.
+3. Push the branch and open a pull request against `main`; use a draft pull request while the work is still in progress.
+4. Mark the pull request ready for review only when the description, tests, documentation, and security or operational impact are ready for review.
+5. Address review feedback and keep the branch's required CI checks green. A maintainer approval is required before merging.
+6. Merge the approved pull request into `main`, then delete the short-lived branch.
+
+The `main` branch should remain buildable and suitable as the starting point for the next change.
+
 ## Before Push
 
 Run the relevant checks before every push:
