@@ -51,17 +51,20 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 - Trusted reverse-proxy client IP detection with explicit proxy networks
 - PaaS-provided `PORT` listen address support
 - Public container PaaS deployment runbook
+- Experimental project status, contributor guidance, security policy, and community health files
+- Dependency integrity, `govulncheck`, and container vulnerability checks in CI
 
 ## Next Tasks
 
-1. Run the load harness in a controlled environment and publish reproducible latency, memory, CPU, and reconnect measurements.
-2. Add a registry-backed alternate win mode or another role with a distinct faction interaction.
-3. Add deployment monitoring, structured request metrics, and alerting.
-4. Add JWT authentication for persistent accounts.
-5. Add PostgreSQL persistence for accounts, game summaries, and audit logs.
-6. Add report, mute, and ban workflows backed by moderation policy.
-7. Add Redis Pub/Sub support for future multi-instance room routing.
+1. Decide the software license and publication scope before making the repository public.
+2. Run the load harness in a controlled environment and publish reproducible latency, memory, CPU, and reconnect measurements.
+3. Add a registry-backed alternate win mode or another role with a distinct faction interaction.
+4. Add deployment monitoring, structured request metrics, and alerting.
+5. Add JWT authentication for persistent accounts.
+6. Add PostgreSQL persistence for accounts, game summaries, and audit logs.
+7. Add report, mute, and ban workflows backed by moderation policy.
+8. Add Redis Pub/Sub support for future multi-instance room routing.
 
 ## Current Priority
 
-The playable prototype now has a reproducible local container path, CI evidence, browser-flow coverage, bounded WebSocket admission, trusted proxy handling, and a public container PaaS runbook. The immediate next step is a controlled single-instance public deployment, followed by load-test evidence, monitoring, and alerting before scaling beyond one process.
+The playable prototype now has a reproducible local container path, CI evidence, browser-flow coverage, bounded WebSocket admission, trusted proxy handling, a public container PaaS runbook, and initial open-source readiness checks. The immediate next step is to decide the licensing and publication boundary, then gather controlled single-instance deployment evidence before considering a public service or multi-process scaling.

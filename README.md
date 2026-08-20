@@ -4,6 +4,12 @@ Midnight Council is a browser-based, real-time social deduction game prototype i
 
 The Go server and its embedded web client already support a repeatable playable loop: nickname-based player or spectator join, room readiness and administration, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, timed last words, win detection, settlement, return to waiting, rematches, and reconnect-token based disconnect/reconnect.
 
+## Project Status
+
+Midnight Council is an experimental pre-release prototype. It is playable locally, but it does not promise API stability, backwards compatibility, production readiness, or a hosted service. No public hosted demo is published yet.
+
+The repository is being prepared for a future open-source release. A software reuse license has not been added yet, so do not assume permission to redistribute or build on the code outside the repository's current arrangements.
+
 ```mermaid
 flowchart LR
     Browser[Browser client] -->|HTTP / WebSocket| Edge[WebSocket edge]
@@ -26,7 +32,7 @@ docker compose up --build
 
 Then open `http://localhost:8080` and use an incognito window or another browser profile to join the same room as a second player.
 
-For native development, install Go `1.26.4` or newer and run:
+For native development, install Go `1.26.6` or newer and run:
 
 ```bash
 make test
@@ -79,7 +85,14 @@ The browser client is embedded in the Go binary; there is no frontend build step
 
 Not included yet: persistent accounts, JWT auth, PostgreSQL, Redis, built-in moderation rules, report and ban workflows, distributed rate limiting, or horizontal scaling.
 
-See [`docs/architecture.md`](docs/architecture.md), [`docs/web-client.md`](docs/web-client.md), [`docs/websocket-protocol.md`](docs/websocket-protocol.md), and [`docs/roadmap.md`](docs/roadmap.md) for design details and upcoming work.
+### Operational boundaries
+
+- Room and game state are in memory and owned by one server process; a restart or redeploy loses active rooms.
+- Rate limits are process-local, and there is no account or authentication system yet.
+- Reconnect tokens are bearer credentials stored by the browser; revisit the trust model before a public deployment.
+- A public deployment must configure exact browser origins, proxy trust, and admission limits as described in [`docs/deployment.md`](docs/deployment.md).
+
+See [`docs/architecture.md`](docs/architecture.md), [`docs/web-client.md`](docs/web-client.md), [`docs/websocket-protocol.md`](docs/websocket-protocol.md), [`docs/deployment.md`](docs/deployment.md), [`docs/roadmap.md`](docs/roadmap.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md), and [`docs/release.md`](docs/release.md) for design details, limitations, contribution guidance, and maintenance plans.
 
 ## Development and Verification
 
@@ -88,13 +101,17 @@ The Make targets use the `go` executable on your `PATH`; no project-specific con
 ```bash
 make fmt
 make fmt-check
+make mod-verify
 make vet
 make test
 make test-race
 make js-check
+make vuln
 ```
 
-`make test-race` needs a Go toolchain with its normal C toolchain support. The GitHub Actions workflow runs formatting, vet, unit/integration tests, race detection, JavaScript syntax validation, and the browser E2E suite on every push to `main` and every pull request.
+`make test-race` needs a Go toolchain with its normal C toolchain support. The GitHub Actions workflow runs formatting, module integrity, vet, unit/integration tests, race detection, JavaScript syntax validation, vulnerability checks, a container scan, and the browser E2E suite on every push to `main` and every pull request.
+
+`make vuln` runs the pinned `govulncheck` release against the module. It needs network access the first time it downloads the tool and its vulnerability database.
 
 Install the test-only browser dependency to run the same E2E suite locally:
 
@@ -161,6 +178,12 @@ http://localhost:8080
 ```
 
 Use separate browser profiles or private windows when testing multiple players on one computer. Tabs in the same browser profile intentionally share the saved seat for a room.
+
+## Contributing and support
+
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Bug reports and feature requests have templates under [`.github/ISSUE_TEMPLATE`](.github/ISSUE_TEMPLATE). Please use [`SECURITY.md`](SECURITY.md) for vulnerabilities rather than opening a public issue, and follow [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) when participating in the project.
+
+The project does not publish a hosted support channel or public demo yet. For release and maintenance conventions, see [`docs/release.md`](docs/release.md) and [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Browser Client
 
