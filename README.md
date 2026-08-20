@@ -1,5 +1,9 @@
 # midnight-council
 
+[![CI](https://github.com/KageRyo/midnight-council/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/KageRyo/midnight-council/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Go 1.26.6+](https://img.shields.io/badge/Go-1.26.6%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+
 Midnight Council is a browser-based, real-time social deduction game prototype inspired by classic night-and-day party games.
 
 The Go server and its embedded web client already support a repeatable playable loop: nickname-based player or spectator join, room readiness and administration, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, timed last words, win detection, settlement, return to waiting, rematches, and reconnect-token based disconnect/reconnect.
