@@ -2,6 +2,8 @@ module midnight-council
 
 go 1.26
 
+toolchain go1.26.6
+
 require (
 	github.com/go-playground/validator/v10 v10.30.3
 	github.com/gorilla/websocket v1.5.3
