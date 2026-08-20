@@ -8,7 +8,13 @@ The Go server and its embedded web client already support a repeatable playable 
 
 Midnight Council is an experimental pre-release prototype. It is playable locally, but it does not promise API stability, backwards compatibility, production readiness, or a hosted service. No public hosted demo is published yet.
 
-The repository is being prepared for a future open-source release. A software reuse license has not been added yet, so do not assume permission to redistribute or build on the code outside the repository's current arrangements.
+The source code is licensed under the Apache License, Version 2.0. See
+[`LICENSE`](LICENSE) and [`NOTICE`](NOTICE) for the license and attribution
+notices. The `Midnight Council` name, logos, and related translated or
+localized marks are not licensed by Apache-2.0; see
+[`TRADEMARKS.md`](TRADEMARKS.md) for the project's brand-use policy. The
+repository is still private while its future public release scope is being
+finalized.
 
 ```mermaid
 flowchart LR
@@ -184,6 +190,14 @@ Use separate browser profiles or private windows when testing multiple players o
 Start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Bug reports and feature requests have templates under [`.github/ISSUE_TEMPLATE`](.github/ISSUE_TEMPLATE). Please use [`SECURITY.md`](SECURITY.md) for vulnerabilities rather than opening a public issue, and follow [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) when participating in the project.
 
 The project does not publish a hosted support channel or public demo yet. For release and maintenance conventions, see [`docs/release.md`](docs/release.md) and [`CHANGELOG.md`](CHANGELOG.md).
+
+## License and trademarks
+
+The source code is available under the [Apache License, Version 2.0](LICENSE).
+Attribution information is in [`NOTICE`](NOTICE). The Apache license does not
+grant permission to operate a fork or service under the `Midnight Council`
+name, its logos, or confusingly similar translations. See
+[`TRADEMARKS.md`](TRADEMARKS.md) before redistributing a branded derivative.
 
 ## Browser Client
 

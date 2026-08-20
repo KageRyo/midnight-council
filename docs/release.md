@@ -25,12 +25,13 @@ Before creating a release:
 1. Start from a clean, up-to-date `main` checkout.
 2. Confirm the intended version is appropriate for an experimental project; use `0.x` while compatibility is not promised.
 3. Run the required checks: `make fmt-check`, `make mod-verify`, `make vet`, `make test`, `make test-race`, `make js-check`, `make vuln`, and the browser E2E suite.
-4. Review the deployment, protocol, security, README, roadmap, and [`CHANGELOG.md`](../CHANGELOG.md) updates.
+4. Review the deployment, protocol, security, README, roadmap, license, attribution, trademark policy, and [`CHANGELOG.md`](../CHANGELOG.md) updates.
 5. Create a tag named `vX.Y.Z` only after the release commit is reviewed and CI is green.
 
 ## GitHub Release checklist
 
 - Use the matching tag and title format `Midnight Council vX.Y.Z`.
+- Before a public release, verify the repository description and Topics still describe the supported project surface.
 - Generate release notes from merged pull requests, then edit them for operationally important changes and known limitations.
 - Mark the release as a pre-release while the project remains experimental.
 - Do not publish a release automatically from a normal push; create it intentionally after the checklist passes.
