@@ -50,6 +50,6 @@ similar translations/localizations:
 - in a way that implies the project maintains, endorses, or sponsors the
   resulting software or service.
 
-No permission to use the project marks is granted by `LICENSE`, `NOTICE.md`, or
+No permission to use the project marks is granted by `LICENSE`, `NOTICE`, or
 the availability of the source code. Permission, if granted, should be
 obtained separately and in writing.

@@ -9,7 +9,7 @@ The Go server and its embedded web client already support a repeatable playable 
 Midnight Council is an experimental pre-release prototype. It is playable locally, but it does not promise API stability, backwards compatibility, production readiness, or a hosted service. No public hosted demo is published yet.
 
 The source code is licensed under the Apache License, Version 2.0. See
-[`LICENSE`](LICENSE) and [`NOTICE.md`](NOTICE.md) for the license and attribution
+[`LICENSE`](LICENSE) and [`NOTICE`](NOTICE) for the license and attribution
 notices. The `Midnight Council` name, logos, and related translated or
 localized marks are not licensed by Apache-2.0; see
 [`TRADEMARKS.md`](TRADEMARKS.md) for the project's brand-use policy. The
@@ -194,7 +194,7 @@ The project does not publish a hosted support channel or public demo yet. For re
 ## License and trademarks
 
 The source code is available under the [Apache License, Version 2.0](LICENSE).
-Attribution information is in [`NOTICE.md`](NOTICE.md). The Apache license does not
+Attribution information is in [`NOTICE`](NOTICE). The Apache license does not
 grant permission to operate a fork or service under the `Midnight Council`
 name, its logos, or confusingly similar translations. See
 [`TRADEMARKS.md`](TRADEMARKS.md) before redistributing a branded derivative.
