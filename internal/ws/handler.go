@@ -7,6 +7,7 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"strconv"
 	"strings"
@@ -31,6 +32,7 @@ type Handler struct {
 	rateLimits       EventRateLimits
 	connectionLimits ConnectionLimits
 	admission        *admissionLimiter
+	trustedProxies   []netip.Prefix
 	origins          originPolicy
 	chatPolicy       moderation.ChatPolicy
 }
@@ -46,6 +48,12 @@ func WithEventRateLimits(limits EventRateLimits) HandlerOption {
 func WithConnectionLimits(limits ConnectionLimits) HandlerOption {
 	return func(h *Handler) {
 		h.connectionLimits = limits
+	}
+}
+
+func WithTrustedProxies(proxies []netip.Prefix) HandlerOption {
+	return func(h *Handler) {
+		h.trustedProxies = append([]netip.Prefix(nil), proxies...)
 	}
 }
 
@@ -121,7 +129,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, room.ErrRoomLimitReached.Error(), http.StatusTooManyRequests)
 		return
 	}
-	release, err := h.admission.acquire(remoteIP(r), creatingRoom, time.Now())
+	release, err := h.admission.acquire(remoteIP(r, h.trustedProxies), creatingRoom, time.Now())
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusTooManyRequests)
 		return
