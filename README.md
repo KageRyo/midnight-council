@@ -106,11 +106,13 @@ npm run test:e2e
 
 The Playwright scenario uses four independent browser contexts to cover joining, private role projection, a night action, reconnect-token recovery, voting, game settlement, and a same-room rematch.
 
-The server listens on `:8080` by default. Override with `ADDR`:
+The server listens on `:8080` by default. `ADDR` takes precedence; when it is unset, the server uses the PaaS-provided `PORT` value:
 
 ```bash
 ADDR=:8081 make run
 ```
+
+For a container PaaS, leave `ADDR` unset so an injected `PORT` such as `10000` is honored. See [`docs/deployment.md`](docs/deployment.md) for trusted proxy configuration and a public container PaaS deployment runbook.
 
 Rooms with no active WebSocket subscribers are removed after `30m` by default. Override with `ROOM_IDLE_TIMEOUT`:
 

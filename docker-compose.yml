@@ -4,6 +4,7 @@ services:
       context: .
     environment:
       ADDR: ":8080"
+      TRUSTED_PROXIES: ${TRUSTED_PROXIES:-}
       ROOM_IDLE_TIMEOUT: ${ROOM_IDLE_TIMEOUT:-30m}
       NIGHT_DURATION: ${NIGHT_DURATION:-1m30s}
       DAY_DISCUSSION_DURATION: ${DAY_DISCUSSION_DURATION:-5m}

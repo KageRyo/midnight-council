@@ -48,6 +48,9 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 - Per-IP connection admission, per-IP room-creation limits, global room cap, and spectator cap
 - Playwright four-browser multiplayer, reconnect, settlement, and rematch flow
 - Configurable Go WebSocket load-test harness
+- Trusted reverse-proxy client IP detection with explicit proxy networks
+- PaaS-provided `PORT` listen address support
+- Public container PaaS deployment runbook
 
 ## Next Tasks
 
@@ -61,4 +64,4 @@ Midnight Council is focused on turning its playable full-stack prototype into a 
 
 ## Current Priority
 
-The playable prototype now has a reproducible local container path, CI evidence, browser-flow coverage, and bounded WebSocket admission. The immediate priority is producing controlled load-test evidence and observability before growing the game rules or exposing it to a wider audience.
+The playable prototype now has a reproducible local container path, CI evidence, browser-flow coverage, bounded WebSocket admission, trusted proxy handling, and a public container PaaS runbook. The immediate next step is a controlled single-instance public deployment, followed by load-test evidence, monitoring, and alerting before scaling beyond one process.

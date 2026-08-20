@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -16,7 +17,10 @@ import (
 )
 
 func main() {
-	addr := getenv("ADDR", ":8080")
+	addr, err := listenAddress()
+	if err != nil {
+		log.Fatalf("invalid server address configuration: %v", err)
+	}
 	roomIdleTimeout := getenvDuration("ROOM_IDLE_TIMEOUT", room.DefaultRoomIdleTimeout)
 	phaseDurations := room.PhaseDurations{
 		Night:         getenvDuration("NIGHT_DURATION", room.DefaultNightDuration),
@@ -58,6 +62,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("invalid ALLOWED_ORIGINS configuration: %v", err)
 	}
+	trustedProxies, err := ws.ParseTrustedProxies(os.Getenv("TRUSTED_PROXIES"))
+	if err != nil {
+		log.Fatalf("invalid TRUSTED_PROXIES configuration: %v", err)
+	}
 	maxRooms := getenvInt("MAX_ROOMS", room.DefaultMaxRooms)
 	if maxRooms <= 0 {
 		log.Fatal("MAX_ROOMS must be positive")
@@ -78,6 +86,7 @@ func main() {
 		ws.WithEventRateLimits(rateLimits),
 		ws.WithConnectionLimits(connectionLimits),
 		ws.WithAllowedOrigins(allowedOrigins),
+		ws.WithTrustedProxies(trustedProxies),
 	)
 
 	mux := http.NewServeMux()
@@ -96,12 +105,13 @@ func main() {
 
 	go func() {
 		log.Printf(
-			"midnight-council game server listening on %s with room idle timeout %s, room cap=%d, spectator cap=%d, allowed origins=%d, phase durations night=%s discussion=%s voting=%s last_words=%s, and WebSocket rate limits chat=%g/s burst=%d game=%g/s burst=%d connection=%g/s burst=%d per_ip=%d room_create=%g/s burst=%d",
+			"midnight-council game server listening on %s with room idle timeout %s, room cap=%d, spectator cap=%d, allowed origins=%d, trusted proxy networks=%d, phase durations night=%s discussion=%s voting=%s last_words=%s, and WebSocket rate limits chat=%g/s burst=%d game=%g/s burst=%d connection=%g/s burst=%d per_ip=%d room_create=%g/s burst=%d",
 			addr,
 			roomIdleTimeout,
 			maxRooms,
 			maxSpectators,
 			len(allowedOrigins),
+			len(trustedProxies),
 			phaseDurations.Night,
 			phaseDurations.DayDiscussion,
 			phaseDurations.DayVoting,
@@ -130,6 +140,18 @@ func main() {
 	if err := server.Shutdown(ctx); err != nil {
 		log.Fatalf("server shutdown failed: %v", err)
 	}
+}
+
+func listenAddress() (string, error) {
+	if addr := os.Getenv("ADDR"); addr != "" {
+		return addr, nil
+	}
+	port := getenv("PORT", "8080")
+	parsed, err := strconv.Atoi(port)
+	if err != nil || parsed < 1 || parsed > 65535 {
+		return "", fmt.Errorf("PORT must be a number from 1 to 65535, got %q", port)
+	}
+	return ":" + port, nil
 }
 
 func getenv(key, fallback string) string {

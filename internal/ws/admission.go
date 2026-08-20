@@ -2,8 +2,11 @@ package ws
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
+	"strings"
 	"sync"
 	"time"
 )
@@ -127,10 +130,149 @@ func (l *admissionLimiter) removeExpired(now time.Time) {
 	}
 }
 
-func remoteIP(request *http.Request) string {
-	host, _, err := net.SplitHostPort(request.RemoteAddr)
-	if err == nil {
-		return host
+// ParseTrustedProxies parses a comma-separated list of proxy IP addresses or
+// CIDR prefixes. An empty value disables forwarded-address processing.
+func ParseTrustedProxies(value string) ([]netip.Prefix, error) {
+	if strings.TrimSpace(value) == "" {
+		return nil, nil
 	}
-	return request.RemoteAddr
+
+	parts := strings.Split(value, ",")
+	prefixes := make([]netip.Prefix, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return nil, errors.New("trusted proxy list contains an empty entry")
+		}
+
+		if prefix, err := netip.ParsePrefix(part); err == nil {
+			prefixes = append(prefixes, prefix.Masked())
+			continue
+		}
+
+		address, err := netip.ParseAddr(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted proxy %q: must be an IP address or CIDR prefix", part)
+		}
+		address = address.Unmap()
+		prefixes = append(prefixes, netip.PrefixFrom(address, address.BitLen()))
+	}
+
+	return prefixes, nil
+}
+
+func remoteIP(request *http.Request, configured ...[]netip.Prefix) string {
+	var trustedProxies []netip.Prefix
+	if len(configured) > 0 {
+		trustedProxies = configured[0]
+	}
+	peer, ok := requestPeerIP(request.RemoteAddr)
+	if !ok {
+		return request.RemoteAddr
+	}
+	if !containsTrustedProxy(trustedProxies, peer) {
+		return peer.String()
+	}
+
+	forwarded := forwardedIPs(request)
+	if len(forwarded) == 0 {
+		return peer.String()
+	}
+
+	chain := append(forwarded, peer)
+	for index := len(chain) - 1; index >= 0; index-- {
+		if !containsTrustedProxy(trustedProxies, chain[index]) {
+			return chain[index].String()
+		}
+	}
+
+	// If every hop is in a configured proxy network, trust the left-most
+	// address supplied by that proxy chain as the original client address.
+	return chain[0].String()
+}
+
+func requestPeerIP(remoteAddr string) (netip.Addr, bool) {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	address, err := netip.ParseAddr(host)
+	if err != nil {
+		return netip.Addr{}, false
+	}
+	return address.Unmap(), true
+}
+
+func containsTrustedProxy(prefixes []netip.Prefix, address netip.Addr) bool {
+	for _, prefix := range prefixes {
+		if prefix.Contains(address) {
+			return true
+		}
+	}
+	return false
+}
+
+func forwardedIPs(request *http.Request) []netip.Addr {
+	if values := request.Header.Values("X-Forwarded-For"); len(values) > 0 {
+		return parseForwardedIPList(values)
+	}
+	if values := request.Header.Values("Forwarded"); len(values) > 0 {
+		return parseForwardedHeader(values)
+	}
+	return nil
+}
+
+func parseForwardedIPList(values []string) []netip.Addr {
+	var addresses []netip.Addr
+	for _, value := range values {
+		for _, item := range strings.Split(value, ",") {
+			address, ok := parseForwardedAddress(item)
+			if !ok {
+				return nil
+			}
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses
+}
+
+func parseForwardedHeader(values []string) []netip.Addr {
+	var addresses []netip.Addr
+	for _, value := range values {
+		for _, element := range strings.Split(value, ",") {
+			var address netip.Addr
+			found := false
+			for _, parameter := range strings.Split(element, ";") {
+				name, rawValue, ok := strings.Cut(strings.TrimSpace(parameter), "=")
+				if !ok || !strings.EqualFold(name, "for") {
+					continue
+				}
+				if found {
+					return nil
+				}
+				var valid bool
+				address, valid = parseForwardedAddress(rawValue)
+				if !valid {
+					return nil
+				}
+				found = true
+			}
+			if !found {
+				return nil
+			}
+			addresses = append(addresses, address)
+		}
+	}
+	return addresses
+}
+
+func parseForwardedAddress(value string) (netip.Addr, bool) {
+	value = strings.Trim(strings.TrimSpace(value), `"`)
+	if address, err := netip.ParseAddr(value); err == nil {
+		return address.Unmap(), true
+	}
+	if addressPort, err := netip.ParseAddrPort(value); err == nil {
+		return addressPort.Addr().Unmap(), true
+	}
+	return netip.Addr{}, false
 }
