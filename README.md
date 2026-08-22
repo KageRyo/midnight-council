@@ -17,8 +17,7 @@ The source code is licensed under the Apache License, Version 2.0. See
 notices. The `Midnight Council` name, logos, and related translated or
 localized marks are not licensed by Apache-2.0; see
 [`TRADEMARKS.md`](TRADEMARKS.md) for the project's brand-use policy. The
-repository is still private while its future public release scope is being
-finalized.
+repository is public while its future release scope is being finalized.
 
 ```mermaid
 flowchart LR
