@@ -11,7 +11,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/midnight-council .
 
 FROM alpine:3.24
 
-RUN addgroup -S midnight && adduser -S -G midnight midnight
+RUN apk upgrade --no-cache \
+    && addgroup -S midnight \
+    && adduser -S -G midnight midnight
 
 COPY --from=build /out/midnight-council /usr/local/bin/midnight-council
 
