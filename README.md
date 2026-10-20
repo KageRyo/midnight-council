@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/KageRyo/midnight-council/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/KageRyo/midnight-council/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Go 1.26.6+](https://img.shields.io/badge/Go-1.26.6%2B-00ADD8?logo=go&logoColor=white)](go.mod)
+[![Go 1.26.9+](https://img.shields.io/badge/Go-1.26.9%2B-00ADD8?logo=go&logoColor=white)](go.mod)
 
 Midnight Council is a browser-based, real-time social deduction game prototype inspired by classic night-and-day party games.
 
@@ -41,7 +41,7 @@ docker compose up --build
 
 Then open `http://localhost:8080` and use an incognito window or another browser profile to join the same room as a second player.
 
-For native development, install Go `1.26.6` or newer and run:
+For native development, install Go `1.26.9` or newer and run:
 
 ```bash
 make test
