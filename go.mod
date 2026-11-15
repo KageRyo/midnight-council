@@ -1,6 +1,6 @@
 module midnight-council
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/go-playground/validator/v10 v10.30.6
