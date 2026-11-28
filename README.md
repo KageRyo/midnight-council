@@ -6,11 +6,11 @@
 
 Midnight Council is a browser-based, real-time social deduction game prototype inspired by classic night-and-day party games.
 
-The Go server and its embedded web client already support a repeatable playable loop: nickname-based player or spectator join, room readiness and administration, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, timed last words, win detection, settlement, return to waiting, rematches, and reconnect-token based disconnect/reconnect.
+The Go server and its embedded web client support the following game flow: nickname-based player or spectator join, room readiness and administration, owner start, random hidden-role assignment, real-time chat, night actions, day discussion, voting, execution, timed last words, win detection, settlement, return to waiting, rematches, and reconnect-token based disconnect/reconnect.
 
 ## Project Status
 
-Midnight Council is an experimental pre-release prototype. It is playable locally, but it does not promise API stability, backwards compatibility, production readiness, or a hosted service. No public hosted demo is published yet.
+Midnight Council is an experimental pre-release prototype that you can play locally. APIs may change between pre-release versions, and no public hosted demo is available yet.
 
 The source code is licensed under the Apache License, Version 2.0. See
 [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE) for the license and attribution
@@ -192,7 +192,7 @@ Use separate browser profiles or private windows when testing multiple players o
 
 Start with [`CONTRIBUTING.md`](CONTRIBUTING.md). Bug reports and feature requests have templates under [`.github/ISSUE_TEMPLATE`](.github/ISSUE_TEMPLATE). Please use [`SECURITY.md`](SECURITY.md) for vulnerabilities rather than opening a public issue, and follow [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) when participating in the project.
 
-The project does not publish a hosted support channel or public demo yet. For release and maintenance conventions, see [`docs/release.md`](docs/release.md) and [`CHANGELOG.md`](CHANGELOG.md).
+For release and maintenance conventions, see [`docs/release.md`](docs/release.md) and [`CHANGELOG.md`](CHANGELOG.md).
 
 ## License and trademarks
 
